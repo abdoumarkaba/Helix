@@ -1,6 +1,15 @@
-[package]
-name = "play"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["crates/play-cli", "crates/play-core", "crates/play-helper"]
+resolver = "2"
 
-[dependencies]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "GPL-3.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

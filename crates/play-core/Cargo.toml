@@ -1,0 +1,46 @@
+[package]
+name = "play-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# Data
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+indexmap = { version = "2", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+semver = { version = "1", features = ["serde"] }
+
+# Binary analysis
+goblin = "0.8"
+sha2 = "0.10"
+
+# System
+nix = { version = "0.27", features = ["process", "resource"] }
+glob = "0.3"
+sysinfo = "0.30"
+
+# CLI + Output
+indicatif = "0.17"
+console = "0.15"
+dialoguer = "0.11"
+
+# Logging + Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Networking
+ureq = { version = "2", features = ["json"] }
+tempfile = "3"
+
+# Error handling
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
