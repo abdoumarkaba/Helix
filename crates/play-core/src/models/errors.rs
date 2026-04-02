@@ -76,8 +76,5 @@ pub enum PlayError {
         "Insufficient VRAM: game likely requires ~{required_mb}MB, \
          detected {available_mb}MB"
     )]
-    InsufficientVram {
-        required_mb: u32,
-        available_mb: u32,
-    },
+    InsufficientVram { required_mb: u32, available_mb: u32 },
 }

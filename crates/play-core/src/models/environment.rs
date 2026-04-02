@@ -1,3 +1,5 @@
+#![allow(clippy::pedantic)]
+
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -98,6 +100,7 @@ pub struct HardwareProfile {
     pub memory: MemoryProfile,
     pub kernel: KernelProfile,
     pub display: DisplayProfile,
+    pub distro: DistroInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +115,8 @@ pub struct GpuProfile {
     pub features: GpuFeatureSet,
     /// Gates thermal-risky tweaks
     pub is_laptop_gpu: bool,
+    /// NVIDIA VBIOS max clock in MHz (for clock lock formula)
+    pub nvidia_vbios_max_clock_mhz: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,6 +212,27 @@ pub struct DisplayProfile {
 pub enum DisplayServer {
     X11,
     Wayland,
+    Unknown,
+}
+
+// ---------------------------------------------------------------------------
+// DistroInfo
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DistroInfo {
+    pub distro: Distro,
+    pub version_id: String,
+    pub pretty_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Distro {
+    Ubuntu,
+    Fedora,
+    Arch,
+    Debian,
+    OpenSUSE,
     Unknown,
 }
 

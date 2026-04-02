@@ -1,3 +1,5 @@
+#![allow(clippy::doc_markdown)]
+
 use std::fs;
 use std::path::Path;
 
@@ -111,7 +113,10 @@ fn detect_anti_cheat(imports: &[String]) -> Vec<AntiCheat> {
     if imports.iter().any(|i| i.contains("vmprotect")) {
         result.push(AntiCheat::VMProtect);
     }
-    if imports.iter().any(|i| i.contains("gameguard") || i.contains("nprotect")) {
+    if imports
+        .iter()
+        .any(|i| i.contains("gameguard") || i.contains("nprotect"))
+    {
         result.push(AntiCheat::GameGuard);
     }
 
@@ -136,7 +141,10 @@ fn detect_engine(imports: &[String]) -> Option<GameEngine> {
         return Some(GameEngine::Unity);
     }
     // Source engine: tier0/vstdlib
-    if imports.iter().any(|i| i == "tier0.dll" || i == "vstdlib.dll") {
+    if imports
+        .iter()
+        .any(|i| i == "tier0.dll" || i == "vstdlib.dll")
+    {
         return Some(GameEngine::Source);
     }
     // Source 2: tier0 + scenesystem
@@ -395,8 +403,7 @@ mod tests {
             .copy_from_slice(&section_virtual_size.to_le_bytes());
         buf[raw_size_offset..raw_size_offset + 4]
             .copy_from_slice(&((aligned_section_end - section_data_start) as u32).to_le_bytes());
-        buf[raw_ptr_offset..raw_ptr_offset + 4]
-            .copy_from_slice(&section_file_offset.to_le_bytes());
+        buf[raw_ptr_offset..raw_ptr_offset + 4].copy_from_slice(&section_file_offset.to_le_bytes());
 
         // Fix up import directory data directory
         buf[import_dir_rva_offset..import_dir_rva_offset + 4]

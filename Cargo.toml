@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/play-cli", "crates/play-core", "crates/play-helper"]
+members = ["crates/play-cli", "crates/play-core", "crates/play-helper", "crates/play-db-tools"]
 resolver = "2"
 
 [workspace.package]

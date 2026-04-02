@@ -1,5 +1,5 @@
 # PLAY — Master Project Brief
-## For: Claude Opus 4.6 Extended Thinking | Windsurf Project Rules
+## For: Claude Sonnet 4.6 Extended Thinking | Project Rules
 
 ---
 
@@ -10,16 +10,35 @@ A distro-agnostic Linux CLI that orchestrates the existing open-source gaming
 compatibility stack to enable post-2005 Windows games to run as well as the
 user's hardware physically allows — with zero manual configuration required.
 
+**THIS IS A DETERMINISTIC RUST BINARY. NOT AN AI AGENT SYSTEM.**
+`play` ships as a compiled Rust binary. It has zero runtime external dependencies:
+no API keys, no network calls to AI services, no cloud-based decision making.
+All intelligence lives in compiled logic and the local `play-db` knowledge cache.
+AI agents are a DEVELOPMENT-TIME tool only (for generating and validating the
+`play-db` knowledge base). They are NEVER part of the shipped binary's runtime.
+
 **Invocation contract (sacred, never changes):**
 ```
-play [game.exe | game.AppImage]
+play game.exe
 ```
 No flags required. No configuration files required from the user.
 No prior knowledge required. One command. Works or tells you exactly why it won't.
 
+**Standard CLI flags always supported:**
+```
+play --help / -h          Show usage and flag reference
+play --version            Print semver, build date, play-db version
+play --yes                Non-interactive mode (skip confirmation prompt)
+play --undo game.exe      Reverse all persistent changes for this game
+play --update-db          Sync local play-db cache
+play --verbose            Show all ResolutionDecision rationale
+play --dry-run            Print plan, write nothing to disk
+```
+
 **What this tool IS:**
-An intelligent orchestrator of Wine/Proton/DXVK/VKD3D-Proton/GameMode/MangoHud
+A deterministic orchestrator of Wine/Proton/DXVK/VKD3D-Proton/GameMode/MangoHud
 and related tools. It detects, decides, installs, configures, and launches.
+Every decision is made by compiled rule trees, not runtime AI calls.
 
 **What this tool IS NOT:**
 - A compatibility layer (it uses existing ones)
@@ -27,14 +46,26 @@ and related tools. It detects, decides, installs, configures, and launches.
 - A package manager (it uses the system's)
 - A Wine replacement
 - Anything that requires root to run normally
+- An AI agent or cloud-dependent service
 
-**License:** FOSS (MIT or GPL-3.0 — decide before first commit, default GPL-3.0
-for copyleft protection of the ecosystem work embedded in this tool)
+**Primary goal of every invocation:** The game runs. Successfully. At maximum
+performance for this hardware. Post-launch, `play` records session metrics
+(FPS via MangoHud, VRAM usage, crash status) to the game's state file.
+If a game exits cleanly, the session is logged as successful. If it crashes,
+the log is preserved and the user is prompted to file a report.
+
+**License:** GPL-3.0 (copyleft protection for the ecosystem work embedded here)
 
 **Target distros v1:** Ubuntu 22.04+, Fedora 38+, Arch Linux, Debian 12+
 **Deferred:** Gentoo, NixOS, source-based distros (Phase 2)
 **Language:** Rust (edition 2021, MSRV 1.75)
 **No unsafe unless absolutely unavoidable and documented with justification**
+
+**GPU support scope:**
+- v1: NVIDIA (proprietary driver stack, nvidia-smi, persistence mode)
+- Phase 2: AMD (AMDGPU/RADV, sysfs DPM level) — architecture is modular; stub
+  the `GpuVendor::AMD` path behind a typed enum arm that returns
+  `TweakDecision::NotApplicable` until Phase 2. Never panic on AMD hardware.
 </project_identity>
 
 ---
@@ -91,18 +122,29 @@ the verbose output sufficient for debugging without source access.
   manifest signed with a known public key.
 - Never trust game-provided data for path construction (path traversal prevention).
 - Audit log every privileged operation with timestamp, operation, and actor.
+
+## 8. A Tweak Is Data, Not Code
+Every optimization maps to the same `Tweak` struct in the `TweakRegistry`.
+The Orchestrator never contains tweak-specific logic — it only iterates the
+registry. Adding tweak #200 is a one-file change. No agent, orchestrator,
+or schema changes required. This is the architectural principle that allows
+scaling to 200+ tweaks without rewrites.
 </core_philosophy>
 
 ---
 
 <architecture>
-# System Architecture: Multi-Agent Orchestration
+# System Architecture: Deterministic Pipeline
 
-## Agent Model
+## Module Pipeline
 
-The system is composed of specialized agents with strict contracts.
-Agents communicate ONLY through typed data structures via the Orchestrator.
-Agents NEVER call each other directly. Agents have NO side effects outside
+`play` is composed of specialized, deterministic code modules with strict typed
+contracts. These are NOT AI agents — they are Rust structs and functions that
+execute compiled decision logic. They are called "agents" in code for semantic
+clarity (each has a single responsibility), but they make zero runtime AI calls.
+
+Modules communicate ONLY through typed data structures via the Orchestrator.
+Modules NEVER call each other directly. Modules have NO side effects outside
 their designated responsibility domain.
 
 ```
@@ -112,32 +154,33 @@ CLI Entry Point (main.rs)
 ┌───────────────────────────────────────────────────────┐
 │                    Orchestrator                        │
 │  Owns: GamePlan, ExecutionState, EventLog              │
-│  Drives: agent sequencing, state machine, checkpoints  │
+│  Drives: module sequencing, state machine, checkpoints │
 └──────────┬────────────────────────────────────────────┘
            │ dispatches typed inputs, receives typed outputs
      ┌─────┴──────────────────────────────────┐
      │                                        │
      ▼                                        ▼
-DetectionAgent                         ValidationAgent
+DetectionModule                        ValidationModule
   ├─ HardwareDetector                    ├─ LaunchMonitor
   ├─ BinaryAnalyzer (PE parser)          ├─ GpuActivityChecker
   ├─ KernelInspector                     ├─ FpsLogger (MangoHud)
   └─ AudioStackDetector                  └─ CrashDetector
            │
            ▼ DetectionResult
-     PlanningAgent
-       ├─ DatabaseClient (local cache)
+     PlanningModule
+       ├─ DatabaseClient (local cache, NO network at runtime)
+       ├─ TweakRegistry  (all tweaks as data structs)
        ├─ ConstraintChecker
-       ├─ DecisionEngine (rule tree)
+       ├─ DecisionEngine (compiled rule tree — no AI)
        └─ PlanBuilder → GamePlan
            │
            ▼ GamePlan (after user confirmation)
-     ExecutionAgents (sequential, checkpointed)
-       ├─ PackageAgent   (system dependencies)
-       ├─ RunnerAgent    (Proton/Wine download+verify)
-       ├─ PrefixAgent    (Wine prefix setup)
-       ├─ SystemAgent    (sysctl + Drop guards)
-       └─ LaunchAgent    (final process spawn)
+     ExecutionModules (sequential, checkpointed)
+       ├─ PackageModule   (system dependencies)
+       ├─ RunnerModule    (Proton/Wine download+verify)
+       ├─ PrefixModule    (Wine prefix setup)
+       ├─ SystemModule    (sysctl + Drop guards, iterates TweakRegistry)
+       └─ LaunchModule    (final process spawn + metrics collection)
 ```
 
 ## Orchestrator State Machine
@@ -151,7 +194,7 @@ enum ExecutionState {
     AwaitingConfirmation { plan: GamePlan },
     Executing { phase: ExecutionPhase, checkpoint: Checkpoint },
     Launching,
-    Running     { pid: u32, guards: Vec<Box<dyn RestoreGuard>> },
+    Running     { pid: u32, guards: ActiveGuards },
     Cleanup,
     Done        { result: RunResult },
     Failed      { phase: ExecutionPhase, error: PlayError, rollback: RollbackManifest },
@@ -193,7 +236,7 @@ Detection fills it. Planning mutates it. Execution reads from it. Never bypass i
 
 ```rust
 /// The complete, versioned description of a game's runtime environment.
-/// This is what gets serialized to state files and what agents pass between them.
+/// This is what gets serialized to state files and what modules pass between them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameEnvironment {
     pub identity:   GameIdentity,
@@ -260,9 +303,11 @@ pub struct GpuProfile {
     pub vram_mb:         u32,
     pub driver_version:  SemVer,
     pub vulkan_version:  Option<SemVer>,
-    pub driver_type:     DriverType,         // Mesa | NvidiaProprietray | IntelANV
+    pub driver_type:     DriverType,         // NvidiaProprietary | Mesa | IntelANV
     pub features:        GpuFeatureSet,
     pub is_laptop_gpu:   bool,               // gates thermal-risky tweaks
+    // NVIDIA-specific: populated by nvidia-smi, None for non-NVIDIA
+    pub nvidia_vbios_max_clock_mhz: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,7 +337,7 @@ pub struct KernelProfile {
     pub version:               KernelVersion,
     pub has_futex2:            bool,    // fsync support, kernel >= 5.16
     pub has_fsync:             bool,    // proton fsync patchset
-    pub vm_max_map_count:      u64,     // current value, needs >= 2097152
+    pub vm_max_map_count:      u64,     // current value
     pub thp_mode:              ThpMode, // always | madvise | never
     pub split_lock_mitigate:   bool,
     pub sched_autogroup:       bool,
@@ -300,9 +345,9 @@ pub struct KernelProfile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayProfile {
-    pub server:          DisplayServer,  // X11 | Wayland
-    pub primary_res:     (u32, u32),
-    pub refresh_hz:      f32,
+    pub server: DisplayServer,           // X11 | Wayland
+    pub primary_res: (u32, u32),
+    pub refresh_hz: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -335,18 +380,17 @@ pub struct DxvkConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerConfig {
     pub runner_type:    RunnerType,
-    pub version:        SemVer,
+    pub version:        SemVer,      // exact version, always latest stable
     pub install_path:   PathBuf,
     pub verified:       bool,        // SHA256 verified on install
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RunnerType {
-    ProtonOfficial,
-    ProtonGE,
-    WineGE,
-    WineStaging,
-    SodaWine,
+    ProtonGE,        // Primary for v1: GE-Proton (latest stable)
+    WineGE,          // 32-bit-only fallback
+    ProtonOfficial,  // Fallback when GE unavailable
+    WineStaging,     // Last resort
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -370,13 +414,14 @@ pub struct PrefixConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemTuning {
     // Each Option = None means "no change needed/safe", Some = "apply this"
-    pub vm_max_map_count:     Option<u64>,
+    pub vm_max_map_count:     Option<u64>,  // hardware-proportional, never hardcoded
     pub thp_mode:             Option<ThpMode>,
     pub sched_autogroup:      Option<bool>,
     pub split_lock_mitigate:  Option<bool>,
     pub ulimit_nofile:        Option<u64>,
     pub cpu_governor:         Option<CpuGovernor>,    // session-scoped
-    pub gpu_perf_mode:        Option<GpuPerfMode>,    // session-scoped
+    pub gpu_perf_mode:        Option<GpuPerfMode>,    // session-scoped, NVIDIA v1
+    pub nvidia_clock_lock_mhz: Option<u32>,           // computed, never hardcoded
     pub esync:                bool,
     pub fsync:                bool,
     pub gamemode:             bool,
@@ -402,30 +447,16 @@ pub struct EnvironmentMetadata {
     pub decisions:         Vec<ResolutionDecision>, // audit trail
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ResolutionSource {
-    FullyAutomatic,
-    DatabaseAssisted { entry_id: String, confidence: f32 },
-    UserOverridden   { fields: Vec<String> },
-    Hybrid           { db_fields: Vec<String>, heuristic_fields: Vec<String> },
-}
-
-/// Every decision the Planning Agent makes is recorded here.
+/// Every decision the Planning module makes is recorded here.
 /// This is what users see in verbose mode and what goes into bug reports.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolutionDecision {
-    pub field:      String,      // "runner.runner_type"
-    pub chosen:     String,      // "ProtonGE"
-    pub reason:     String,      // "Game uses WMF video; GE includes media patches"
+    pub field:      String,      // "runner.version"
+    pub chosen:     String,      // "GE-Proton9-27"
+    pub reason:     String,      // "Latest stable GE-Proton; 9.27 fixes Cyberpunk VKD3D regression"
     pub confidence: Confidence,
     pub source:     DecisionSource,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Confidence { High, Medium, Low, Inferred }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DecisionSource { Database, Heuristic, HardwareDetection, UserOverride }
 ```
 
 ## Error Model
@@ -488,6 +519,9 @@ pub enum PlayError {
 <decision_logic>
 # Decision Engine: If-Then Logic
 
+All logic here is compiled Rust. No runtime AI calls. No network lookups during
+game launch. The database cache is consulted offline.
+
 ## The Runner Selection Tree (implement as match on typed enums, never strings)
 
 ```
@@ -508,39 +542,83 @@ INPUT: DirectXVersion + AntiCheat[] + GameEngine + has_video_cutscenes + GpuVend
    AntiCheat contains Denuvo OR EasyAntiCheat (linux_supported: true)
    → DxvkConfig.async_compile = false
 
-4. RUNNER SELECTION:
+4. RUNNER TYPE SELECTION:
    has_video_cutscenes = true   → RunnerType::ProtonGE  (WMF patches)
    GameEngine = REEngine        → RunnerType::ProtonGE  (specific patches exist)
    dx_version = D3D12           → RunnerType::ProtonGE  (better VKD3D integration)
-   pe_arch = x86 (32-bit)       → RunnerType::WineGE or ProtonGE (32-bit prefix)
+   pe_arch = x86 (32-bit)       → RunnerType::ProtonGE  (32-bit prefix support)
    default                      → RunnerType::ProtonGE  (GE is always safer default)
 
-5. WINDOWS VERSION REPORTED TO GAME:
+5. RUNNER VERSION SELECTION (version matters — this is not optional):
+   - Query play-db cache for game-specific version_min constraints first.
+   - If db has a version_min entry (e.g. "9.10"), use that as the floor.
+   - ALWAYS select the latest stable GE-Proton release that meets the floor.
+   - Latest stable = highest version tag in the local db runner manifest
+     (runners.toml in play-db cache, updated on --update-db).
+   - NEVER hardcode a version string. NEVER default to "latest" without
+     recording the resolved concrete version in ResolutionDecision.
+   - If no db entry exists, select the most recent stable GE-Proton release.
+   - Record the specific version chosen: "GE-Proton9-27" not "ProtonGE latest"
+
+6. WINDOWS VERSION REPORTED TO GAME:
    D3D12        → WindowsVersion::Win10
    D3D11        → WindowsVersion::Win10
    D3D9 + old   → WindowsVersion::Win7  (some old games reject Win10)
    default      → WindowsVersion::Win10
 
-6. FSYNC vs ESYNC:
+7. FSYNC vs ESYNC:
    kernel.has_futex2 = true    → fsync=true, esync=false
    kernel.has_futex2 = false   → fsync=false, esync=true
                                   + check ulimit_nofile >= 524288
                                   + if not: add ulimit raise to plan
 
-7. SYSTEM TWEAKS (each is a TweakConstraint check before adding to plan):
-   Always evaluate vm_max_map_count: if current < 2097152, add to plan
-   RAM >= 16384 MB: evaluate thp_mode → madvise
-   x86 CPU: evaluate split_lock_mitigate → 0
-   Wine/Proton active: evaluate sched_autogroup → 0
-   NOT laptop GPU: evaluate gpu_perf_mode → max
-   NOT battery: evaluate cpu_governor → performance
+8. vm.max_map_count — HARDWARE-PROPORTIONAL, NEVER HARDCODED:
+   Compute target value from (RAM_mb + VRAM_mb) combined addressable memory:
 
-8. VKD3D FEATURE LEVEL:
-   GpuFeatureSet.dx12_feature_level is Some(level) → set VKD3D_FEATURE_LEVEL env
-   Otherwise: leave unset (VKD3D auto-detects, safer than wrong explicit value)
+   combined_mb = hardware.memory.total_mb + hardware.gpu.vram_mb as u64
 
-9. LARGE ADDRESS AWARE:
-   pe_arch = x86 (32-bit) AND vram_mb > 2048 → PrefixConfig.large_address_aware = true
+   match combined_mb {
+       0..=16_384         => 2_097_152,         // SteamOS baseline
+       16_385..=32_768    => 8_388_608,          // 4× baseline
+       32_769..=65_536    => 16_777_216,         // 8× baseline (Intel HX class)
+       _                  => 2_147_483_642,      // MAX_INT-5, SteamOS max
+   }
+
+   Only add to plan if current value < target. Write target to rollback manifest
+   BEFORE changing. The rationale displayed to user must include the computed
+   value and the system class it maps to.
+
+9. NVIDIA GPU CLOCK LOCK — COMPUTED, NEVER HARDCODED:
+   // Common guides hardcode -lgc 1530,1530. This is WRONG for most GPUs.
+   // 1530 MHz is below boost clock on RTX 3080+ and below base on RTX 4090.
+   // Correct: 95% of VBIOS max, rounded to nearest 15 MHz step.
+
+   fn compute_nvidia_lock_clock(vbios_max_mhz: u32) -> u32 {
+       ((vbios_max_mhz as f32 * 0.95) as u32 / 15) * 15
+   }
+   // RTX 4090: max=2520 → lock=2385
+   // RTX 3080: max=1710 → lock=1620
+   // RTX 3050: max=1777 → lock=1680
+   // Source: nvidia-smi --query-gpu=clocks.max.gr --format=csv,noheader
+
+   Stored in SystemTuning.nvidia_clock_lock_mhz.
+   Applied via play-helper: nvidia-smi -lgc {value},{value}
+   Restored via GpuPerfGuard Drop: nvidia-smi -rgc
+
+10. SYSTEM TWEAKS (each is a TweakConstraint check before adding to plan):
+    Always evaluate vm_max_map_count (hardware-proportional as above)
+    RAM >= 16384 MB: evaluate thp_mode → madvise
+    x86 CPU: evaluate split_lock_mitigate → 0
+    Wine/Proton active: evaluate sched_autogroup → 0
+    NVIDIA GPU + NOT laptop: evaluate gpu_perf_mode + clock lock
+    NOT laptop, NOT battery: evaluate cpu_governor → performance
+
+11. VKD3D FEATURE LEVEL:
+    GpuFeatureSet.dx12_feature_level is Some(level) → set VKD3D_FEATURE_LEVEL env
+    Otherwise: leave unset (VKD3D auto-detects, safer than wrong explicit value)
+
+12. LARGE ADDRESS AWARE:
+    pe_arch = x86 (32-bit) AND vram_mb > 2048 → PrefixConfig.large_address_aware = true
 ```
 
 ## TweakConstraint: Gate every risky tweak behind typed constraints
@@ -550,11 +628,13 @@ pub struct TweakConstraint {
     pub tweak:                   SystemTweak,
     pub min_ram_mb:              Option<u32>,
     pub kernel_version_min:      Option<KernelVersion>,
+    pub gpu_vendor_required:     Option<GpuVendor>,  // None = all vendors
     pub gpu_vendor_exclusions:   Vec<GpuVendor>,
     pub cpu_arch_required:       Option<CpuArch>,
     pub requires_desktop:        bool,    // false = applies to laptops too
     pub reversible:              bool,
     pub reboot_required:         bool,
+    pub reboot_resets:           bool,    // sysctl resets on reboot anyway
     pub risk_level:              RiskLevel,
     pub rationale:               &'static str,
 }
@@ -600,7 +680,7 @@ Implement ALL of these. Sorted by Class and impact.
 
 | Tweak | Implementation | Condition |
 |-------|---------------|-----------|
-| vm.max_map_count | sysctl via helper binary, RollbackEntry written first | always if < 2097152 |
+| vm.max_map_count | sysctl via helper binary, hardware-proportional value | always if current < target |
 | kernel.sched_autogroup | sysctl via helper | Wine/Proton active |
 | kernel.split_lock_mitigate | sysctl via helper | x86 arch only |
 | THP → madvise | Write to `/sys/kernel/mm/transparent_hugepage/enabled` | RAM >= 16GB |
@@ -611,16 +691,48 @@ Implement ALL of these. Sorted by Class and impact.
 
 ## Class C — Hardware-conditional, explicit user consent per invocation
 
+### NVIDIA (v1 — fully implemented)
+
 | Tweak | Implementation | Condition | Desktop Only |
 |-------|---------------|-----------|-------------|
-| NVIDIA max perf mode | `nvidia-smi -pm 1` via helper, GpuPerfGuard Drop restore | NVIDIA GPU | YES |
-| AMD perf level → high | Write `high` to sysfs power_dpm path, GpuPerfGuard Drop restore | AMD GPU | YES |
-| Optimized kernel | RECOMMEND ONLY, never auto-install | binary distro | N/A |
+| NVIDIA persistence mode | `nvidia-smi -pm 1` via helper, GpuPerfGuard Drop restore | NVIDIA GPU | YES |
+| NVIDIA clock lock | `nvidia-smi -lgc {computed},{computed}` via helper, restored with `-rgc` | NVIDIA GPU, NOT laptop | YES |
+
+### AMD (Phase 2 — stubbed, architecture ready)
+
+```rust
+// AMD perf tweaks are NOT implemented in v1.
+// The GpuVendor::AMD arm in the TweakRegistry returns TweakDecision::NotApplicable
+// for all Class C GPU tweaks. This is NOT a panic, NOT an error — silent skip.
+// When Phase 2 begins:
+//   - amd_perf_level_high: sysfs power_dpm_force_performance_level → "high"
+//   - Drop guard restores to "auto"
+// The GpuPerfGuard enum will gain an Amd variant. No other code changes.
+impl GpuPerfGuard {
+    pub fn set_max(vendor: &GpuVendor, hw: &GpuProfile) -> Result<Self, PlayError> {
+        match vendor {
+            GpuVendor::NVIDIA if !hw.is_laptop_gpu => { /* implemented */ }
+            GpuVendor::AMD    if !hw.is_laptop_gpu => {
+                // Phase 2: write to power_dpm_force_performance_level
+                tracing::warn!(event = "phase2_stub", tweak = "amd_perf_level");
+                Ok(Self::Noop) // silent no-op, not an error
+            }
+            _ => Ok(Self::Noop),
+        }
+    }
+}
+```
+
+### Recommendation-only (never auto-apply)
+
+| Tweak | Implementation | Condition |
+|-------|---------------|-----------|
+| Optimized kernel | RECOMMEND ONLY, never auto-install | binary distro, user consent |
 
 ## NEVER touch (document why in code comments)
 
 - BIOS/UEFI settings
-- GPU overclocking  
+- GPU overclocking beyond the computed 95% clock lock
 - MCE behavior
 - Direct kernel module modification
 - System-wide mitigation disable (`mitigations=off`)
@@ -688,15 +800,42 @@ play-db/
 │   └── {exe_hash[0:2]}/       # first 2 chars of hash (git-object-store pattern)
 │       └── {exe_hash}/
 │           ├── default.toml   # primary entry (all GPU vendors)
-│           ├── nvidia.toml    # GPU-conditional variant if needed
-│           └── amd.toml
+│           └── nvidia.toml    # GPU-conditional variant (AMD stub for Phase 2)
+├── runners.toml               # canonical runner version manifest
+│                              # lists all available GE-Proton versions + SHA256
+│                              # updated by maintainer CI, never runtime-fetched
 ├── reports/                   # raw reports, append-only, never edited post-submit
 │   └── {year}/{month}/
 │       └── {report_id}.toml
 └── tools/
     ├── validate.py            # run in CI on every PR
     ├── compute_confidence.py  # recomputes confidence scores nightly
-    └── promote_report.py      # maintainer helper: report → entry
+    └── promote_report.rs      # Rust binary: report → entry (in play-db-tools workspace)
+```
+
+## runners.toml — Runner Version Manifest
+
+```toml
+# runners.toml — updated by CI when new GE-Proton is released
+# This file is what play reads to select "latest stable"
+# play NEVER fetches runner metadata from the internet at game launch time
+
+[proton_ge]
+latest_stable = "GE-Proton9-27"
+
+[[proton_ge.releases]]
+version    = "GE-Proton9-27"
+url        = "https://github.com/GloriousEggroll/proton-ge-custom/releases/..."
+sha256     = "abc123..."
+released   = "2025-02-15"
+notes      = "Fixes VKD3D regression in DX12 games with Ray Tracing enabled"
+
+[[proton_ge.releases]]
+version    = "GE-Proton9-26"
+url        = "..."
+sha256     = "def456..."
+released   = "2025-01-28"
+notes      = ""
 ```
 
 ## Entry Schema (TOML)
@@ -716,12 +855,12 @@ canonical_name  = "Cyberpunk 2077"
 # Missing fields match ANY value (open constraint).
 [entry.conditions]
 dx_version          = "D3D12"
-gpu_vendor          = ["AMD", "NVIDIA"]  # empty = all vendors
+gpu_vendor          = ["NVIDIA"]     # v1: NVIDIA only entries; AMD Phase 2
 gpu_vulkan_min      = "1.3"
 kernel_min          = "6.0"
 runner_type         = "ProtonGE"
-runner_version_min  = "8.0"
-anti_cheat          = []                 # must have NONE of these to apply
+runner_version_min  = "9.10"         # floor version — play selects latest above this
+anti_cheat          = []             # must have NONE of these to apply
 
 [entry.outcome]
 result       = "Optimal"       # Broken | Degraded | Playable | Optimal
@@ -730,17 +869,16 @@ degradations = ["shader_stutter_first_run"]
 blockers     = []
 
 [entry.configuration]
-# Direct mutations to GameEnvironment fields
 [entry.configuration.runner]
 type        = "ProtonGE"
-version_min = "8.0"
+version_min = "9.10"           # play will resolve to latest stable >= this
 
 [entry.configuration.graphics]
 translation_layer = "Vkd3dProton"
 dxvk_async        = false
 
 [entry.configuration.system]
-vm_max_map_count  = 16777216
+vm_max_map_count  = 16777216   # hardware class: Intel HX + discrete
 fsync             = true
 
 [entry.configuration.prefix]
@@ -748,15 +886,14 @@ windows_version = "Win10"
 dll_overrides   = []
 
 [entry.configuration.env_vars]
-WINE_LARGE_ADDRESS_AWARE = "0"  # 64-bit game, not needed
-VKD3D_FEATURE_LEVEL      = "12_1"
+VKD3D_FEATURE_LEVEL = "12_1"
 
 [entry.metadata]
 created           = "2024-11-01"
 last_validated    = "2025-01-15"   # auto-expires: entry becomes "Unverified" after 90 days
 contributor_count = 47
 report_ids        = ["report-uuid-1", "report-uuid-2"]
-maintainer_notes  = "Confirmed stable across 3 GE-Proton versions"
+maintainer_notes  = "Confirmed stable on GE-Proton9-20 through 9-27"
 ```
 
 ## Confidence Score Formula (computed, never assigned)
@@ -765,12 +902,12 @@ maintainer_notes  = "Confirmed stable across 3 GE-Proton versions"
 # compute_confidence.py — runs nightly via CI
 def compute_confidence(reports: List[Report], entry: Entry) -> float:
     now = datetime.utcnow()
-    
+
     recency  = recency_weight(entry.last_validated, now)    # decays to 0.3 after 180 days
     volume   = volume_weight(len(reports))                  # log scale, saturates at ~50 reports
     diversity = hardware_diversity(reports)                 # unique GPU models / total reports
     stability = version_stability(reports)                  # consistent across runner versions?
-    
+
     return recency * volume * diversity * stability  # all factors in [0, 1]
     # Result < 0.3 → entry becomes "Unverified" automatically
     # Result > 0.8 → entry gets "Verified" badge
@@ -781,6 +918,7 @@ def compute_confidence(reports: List[Report], entry: Entry) -> float:
 ```
 ~/.local/share/play/db/
 ├── cache.toml          # metadata: last_sync, entry_count, db_version
+├── runners.toml        # local copy of runner version manifest
 ├── entries/            # local mirror of play-db/entries/
 └── reports/            # pending reports awaiting submission
 ```
@@ -818,7 +956,7 @@ fn score_entry(entry: &DbEntry, hw: &HardwareProfile) -> Option<ScoredEntry> {
 
     Some(ScoredEntry { entry, score })
 }
-// An entry verified on RX 6800 XT applies to RX 7900 XT with reduced score.
+// An entry verified on RTX 3080 applies to RTX 4070 with reduced score.
 // That's better than returning nothing.
 ```
 </database_design>
@@ -826,7 +964,7 @@ fn score_entry(entry: &DbEntry, hw: &HardwareProfile) -> Option<ScoredEntry> {
 ---
 
 <binary_analysis>
-# Static Binary Analysis (DetectionAgent)
+# Static Binary Analysis (DetectionModule)
 
 ## PE Parser (goblin crate — no process execution)
 
@@ -869,11 +1007,11 @@ pub fn analyze_binary(path: &Path) -> Result<BinaryAnalysis, PlayError> {
 
     // Anti-cheat: DLL name signatures
     let mut anti_cheat = vec![];
-    if imports.iter().any(|i| i.contains("easyanticheat"))    { 
-        anti_cheat.push(AntiCheat::EasyAntiCheat { linux_supported: false }); // check DB later
+    if imports.iter().any(|i| i.contains("easyanticheat"))    {
+        anti_cheat.push(AntiCheat::EasyAntiCheat { linux_supported: false });
     }
-    if imports.iter().any(|i| i.contains("battleye"))         { 
-        anti_cheat.push(AntiCheat::BattlEye { linux_supported: false }); 
+    if imports.iter().any(|i| i.contains("battleye"))         {
+        anti_cheat.push(AntiCheat::BattlEye { linux_supported: false });
     }
 
     // Engine hints from known DLL patterns
@@ -888,11 +1026,14 @@ pub fn analyze_binary(path: &Path) -> Result<BinaryAnalysis, PlayError> {
 }
 
 fn detect_engine(imports: &[String]) -> Option<GameEngine> {
-    // Known engine DLL signatures
-    if imports.iter().any(|i| i.contains("phonon"))     { return Some(GameEngine::UnrealEngine4); }
-    if imports.iter().any(|i| i == "gameoverlayrenderer64.dll") { /* likely UE */ }
-    // RE Engine: known specific DLL
+    if imports.iter().any(|i| i.contains("phonon"))      { return Some(GameEngine::UnrealEngine4); }
     if imports.iter().any(|i| i.contains("mt_framework")) { return Some(GameEngine::REEngine); }
+    if imports.iter().any(|i| i.contains("unityplayer") || i.contains("mono")) {
+        return Some(GameEngine::Unity);
+    }
+    if imports.iter().any(|i| i == "tier0.dll" || i == "vstdlib.dll") {
+        return Some(GameEngine::Source);
+    }
     None
 }
 ```
@@ -901,7 +1042,7 @@ fn detect_engine(imports: &[String]) -> Option<GameEngine> {
 ---
 
 <hardware_detection>
-# Hardware Detection (DetectionAgent)
+# Hardware Detection (DetectionModule)
 
 ## Detection Strategy Per Component
 
@@ -913,35 +1054,39 @@ GPU vendor: lspci -mm | grep -i "VGA\|3D" → parse vendor ID
 GPU model: lspci output, or /sys/class/drm/card0/device/product_name
 
 GPU VRAM:  NVIDIA: nvidia-smi --query-gpu=memory.total --format=csv,noheader
-           AMD:    /sys/class/drm/card0/device/mem_info_vram_total
            Intel:  vulkaninfo | grep "maxMemoryAllocationCount"
+           AMD (Phase 2): /sys/class/drm/card0/device/mem_info_vram_total
 
 Driver version:
            NVIDIA: nvidia-smi --query-gpu=driver_version --format=csv,noheader
-           AMD:    glxinfo -B | grep "OpenGL version" | parse Mesa version
-                   Fallback: /sys/class/drm/card0/device/uevent
+           AMD (Phase 2): glxinfo -B | grep "OpenGL version" | parse Mesa version
+
+NVIDIA VBIOS max clock (required for computed clock lock):
+           nvidia-smi --query-gpu=clocks.max.gr --format=csv,noheader
+           Parse as u32 MHz. Store in GpuProfile.nvidia_vbios_max_clock_mhz.
+           If this query fails: clock lock tweak becomes NotApplicable.
 
 Vulkan:    vulkaninfo --json | jq '.properties.apiVersion'
            CRITICAL: parse as packed uint32: (major << 22) | (minor << 12) | patch
 
 Kernel:    fs::read_to_string("/proc/version") → parse semver
            futex2: kernel >= 5.16 (check precisely, not approximately)
-           sched_autogroup current: fs::read_to_string("/proc/sys/kernel/sched_autogroup_enabled")
-           vm.max_map_count: fs::read_to_string("/proc/sys/vm/max_map_count")
+           sched_autogroup current: /proc/sys/kernel/sched_autogroup_enabled
+           vm.max_map_count: /proc/sys/vm/max_map_count
            split_lock: /proc/sys/kernel/split_lock_mitigate
 
 CPU:       fs::read_to_string("/proc/cpuinfo")
-           physical_cores: count unique "core id" values  
+           physical_cores: count unique "core id" values
            logical_cores: count "processor" entries
            AVX2: flags line contains "avx2"
-           laptop: check if any CPU freq policy is "powersave" on AC
+           laptop: check /sys/class/power_supply/BAT0/present == 1
 
 Audio:     Check process list for "pipewire" or "pulseaudio" running
            PipeWire: pw-dump --json | parse defaultNodes sample rate
            PulseAudio: pactl info | grep "Default Sample Spec" | parse rate
 
 Display:   Check $WAYLAND_DISPLAY (set → Wayland) or $DISPLAY (set → X11)
-           Resolution: xrandr --current | parse primary, or wlr-randr
+           Resolution: wlr-randr (Wayland) or xrandr (X11)
 
 Distro:    /etc/os-release: ID, VERSION_ID, ID_LIKE
            Package manager: which apt / dnf / pacman / zypper (first found wins)
@@ -968,7 +1113,7 @@ Only GPU vendor and DX version detection failures are hard errors
 play/
 ├── Cargo.toml
 ├── Cargo.lock              # committed — reproducible builds
-├── DESIGN.md               # Plan→Confirm→Execute model, agent contracts, error philosophy
+├── DESIGN.md               # Plan→Confirm→Execute model, module contracts, error philosophy
 ├── CONTRIBUTING.md
 ├── LICENSE                 # GPL-3.0
 │
@@ -977,7 +1122,7 @@ play/
 │   │   └── src/
 │   │       └── main.rs
 │   │
-│   ├── play-core/          # Library crate: all agents, orchestrator, data model
+│   ├── play-core/          # Library crate: all modules, orchestrator, data model
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── models/     # GameEnvironment and all types
@@ -985,7 +1130,17 @@ play/
 │   │       │   ├── environment.rs
 │   │       │   ├── hardware.rs
 │   │       │   └── errors.rs
-│   │       ├── agents/
+│   │       ├── tweaks/     # THE REGISTRY — each tweak is one file
+│   │       │   ├── mod.rs  # TweakRegistry, Tweak struct, TweakDecision
+│   │       │   ├── fsync.rs
+│   │       │   ├── sched_autogroup.rs
+│   │       │   ├── vm_max_map.rs
+│   │       │   ├── split_lock.rs
+│   │       │   ├── cpu_governor.rs
+│   │       │   ├── gpu_perf_nvidia.rs  # NVIDIA only; AMD stub returns NotApplicable
+│   │       │   ├── audio_rate.rs
+│   │       │   └── ... (one file per tweak, forever)
+│   │       ├── modules/
 │   │       │   ├── mod.rs
 │   │       │   ├── detection.rs
 │   │       │   ├── planning.rs
@@ -994,15 +1149,15 @@ play/
 │   │       │   │   ├── packages.rs
 │   │       │   │   ├── runner.rs
 │   │       │   │   ├── prefix.rs
-│   │       │   │   └── system.rs
+│   │       │   │   └── system.rs   # iterates TweakRegistry — no tweak logic
 │   │       │   └── validation.rs
 │   │       ├── orchestrator.rs
 │   │       ├── database.rs
 │   │       ├── guards/     # Drop-based restore guards
 │   │       │   ├── mod.rs
 │   │       │   ├── governor.rs
-│   │       │   └── gpu_perf.rs
-│   │       ├── binary/     # PE/AppImage analysis
+│   │       │   └── gpu_perf.rs     # GpuPerfGuard::Nvidia implemented; ::Amd = Noop
+│   │       ├── binary/     # PE analysis
 │   │       │   └── pe.rs
 │   │       └── state/      # Checkpoint, rollback manifest, state files
 │   │           └── mod.rs
@@ -1012,7 +1167,7 @@ play/
 │           └── main.rs     # Accepts JSON commands on stdin, executes, returns JSON
 │
 ├── tests/
-│   ├── integration/        # Full agent pipeline tests with mocked hardware
+│   ├── integration/        # Full module pipeline tests with mocked hardware
 │   └── fixtures/
 │       ├── proc/           # Mocked /proc content for testing
 │       ├── sys/            # Mocked /sys content for testing
@@ -1035,7 +1190,7 @@ members = ["crates/play-cli", "crates/play-core", "crates/play-helper"]
 # Data
 serde       = { version = "1", features = ["derive"] }
 toml        = "0.8"
-indexmap    = { version = "2", features = ["serde"] }  # ordered HashMap
+indexmap    = { version = "2", features = ["serde"] }
 chrono      = { version = "0.4", features = ["serde"] }
 uuid        = { version = "1", features = ["v4", "serde"] }
 semver      = "1"
@@ -1058,7 +1213,7 @@ dialoguer   = "0.11"    # user confirmation prompts
 # Logging + Tracing
 tracing              = "0.1"
 tracing-subscriber   = { version = "0.3", features = ["env-filter", "json"] }
-tracing-appender     = "0.2"    # file logging alongside terminal
+tracing-appender     = "0.2"
 
 # Networking (runner downloads)
 ureq        = { version = "2", features = ["json"] }  # blocking, no tokio needed v1
@@ -1075,7 +1230,7 @@ predicates  = "3"
 [profile.release]
 opt-level   = 3
 lto         = "thin"
-codegen-units = 1   # best binary size + perf
+codegen-units = 1
 strip       = true
 ```
 </project_structure>
@@ -1090,7 +1245,7 @@ strip       = true
 The main `play` process must NEVER run as root. A separate small binary
 (`play-helper`) handles the narrow set of operations requiring elevated privilege.
 This binary is installed setuid or called via polkit. It is intentionally minimal
-and auditable. It does EXACTLY four things and refuses everything else.
+and auditable. It does EXACTLY five things and refuses everything else.
 
 ## play-helper Command Interface
 
@@ -1104,13 +1259,18 @@ and auditable. It does EXACTLY four things and refuses everything else.
 // Read sysctl (to capture rollback value)
 { "cmd": "sysctl_read", "key": "vm.max_map_count" }
 
-// Write to sysfs path (GPU perf level, THP mode, etc.)
-// Path is validated against a whitelist — never pass arbitrary paths
-{ "cmd": "sysfs_write", "path": "gpu_perf_level", "value": "high" }
+// Write to sysfs path (THP mode, etc.)
+{ "cmd": "sysfs_write", "path": "thp_mode", "value": "madvise" }
 // "path" is a KEY into a hardcoded whitelist inside play-helper, NOT a raw path
 
-// Set GPU persistence mode (NVIDIA only)
+// NVIDIA persistence mode on/off
 { "cmd": "nvidia_pm", "enable": true }
+
+// NVIDIA clock lock (set) — value is the computed MHz, e.g. 1680
+{ "cmd": "nvidia_clock_lock", "mhz": 1680 }
+
+// NVIDIA clock lock (reset / restore)
+{ "cmd": "nvidia_clock_reset" }
 
 // All other commands → immediate rejection with non-zero exit
 ```
@@ -1121,11 +1281,12 @@ and auditable. It does EXACTLY four things and refuses everything else.
 // play-helper/src/main.rs — the ENTIRE set of paths it will write to
 // Adding to this list requires code review and justification comment
 const SYSFS_WHITELIST: &[(&str, &str)] = &[
-    ("gpu_perf_level", "/sys/class/drm/card0/device/power_dpm_force_performance_level"),
     ("thp_mode",       "/sys/kernel/mm/transparent_hugepage/enabled"),
     ("split_lock",     "/proc/sys/kernel/split_lock_mitigate"),
     ("autogroup",      "/proc/sys/kernel/sched_autogroup_enabled"),
     ("max_map_count",  "/proc/sys/vm/max_map_count"),
+    // NOTE: AMD gpu_perf_level intentionally omitted until Phase 2
+    // ("gpu_perf_level", "/sys/class/drm/card0/device/power_dpm_force_performance_level"),
 ];
 ```
 </privileged_helper>
@@ -1142,51 +1303,75 @@ const SYSFS_WHITELIST: &[(&str, &str)] = &[
 ├── config.toml                        # global tool config
 ├── db/                                # local database cache
 │   ├── cache.toml
+│   ├── runners.toml                   # runner version manifest
 │   └── entries/
-├── runners/                           # downloaded runners
-│   ├── ProtonGE-8.26/
-│   └── WineGE-8.0/
+├── runners/                           # downloaded + verified runners
+│   └── GE-Proton9-27/
 └── games/
     └── {exe_hash}/
-        ├── environment.toml           # complete GameEnvironment (the canonical record)
-        ├── checkpoint.toml            # current execution state (for resumption)
+        ├── environment.toml           # complete GameEnvironment
+        ├── checkpoint.toml            # execution state for resumption
         ├── rollback.toml              # every persistent change, pre-change values
-        ├── session.log                # tracing output from last session (rotated, 3 kept)
-        ├── prefix/                    # Wine prefix (symlink or actual dir)
+        ├── session.log                # tracing output, 3 rotated
+        ├── metrics.toml               # post-launch FPS, VRAM, session duration log
+        ├── prefix/                    # Wine prefix
         └── reports/
-            └── {timestamp}.toml      # pending report submissions
+            └── {timestamp}.toml
 ```
 
 ## Rollback Manifest
 
 ```toml
 # rollback.toml — written BEFORE each change, never after
-schema_version = 1
+schema_version = 2
+game_hash      = "sha256:abc123..."
+play_version   = "0.1.0"
+created_at     = "2025-03-01T14:22:08Z"
 
 [[changes]]
-kind           = "Sysctl"
-key            = "vm.max_map_count"
-previous_value = "65530"
-current_value  = "16777216"
-changed_at     = "2025-03-01T14:22:11Z"
-play_version   = "0.1.0"
+kind            = "Sysctl"
+key             = "vm.max_map_count"
+previous_value  = "65530"
+current_value   = "16777216"
+changed_at      = "2025-03-01T14:22:11Z"
+reboot_resets   = true       # sysctl resets on reboot; --undo skips if already reset
+undo_strategy   = "sysctl"  # "sysctl" | "sysfs" | "file_delete" | "package" | "registry"
+undo_command    = "sysctl -w vm.max_map_count=65530"  # what --undo will run
+verified_before = true       # pre-change value was read and confirmed before writing
 
 [[changes]]
-kind           = "Sysctl"
-key            = "kernel.sched_autogroup_enabled"
-previous_value = "1"
-current_value  = "0"
-changed_at     = "2025-03-01T14:22:12Z"
-play_version   = "0.1.0"
+kind            = "Sysctl"
+key             = "kernel.sched_autogroup_enabled"
+previous_value  = "1"
+current_value   = "0"
+changed_at      = "2025-03-01T14:22:12Z"
+reboot_resets   = true
+undo_strategy   = "sysctl"
+undo_command    = "sysctl -w kernel.sched_autogroup_enabled=1"
+verified_before = true
 
 [[changes]]
-kind           = "PackageInstalled"
-package        = "gamemode"
-package_manager = "dnf"
-changed_at     = "2025-03-01T14:22:09Z"
-play_version   = "0.1.0"
-# Note: packages are NOT auto-uninstalled on rollback.
-# Record is informational. User prompted to review.
+kind             = "PackageInstalled"
+package          = "gamemode"
+package_manager  = "dnf"
+changed_at       = "2025-03-01T14:22:09Z"
+undo_strategy    = "package"
+undo_command     = "dnf remove -y gamemode"
+# NOTE: packages are NOT auto-uninstalled on rollback.
+# Record is informational. --undo for packages prompts the user.
+
+[[changes]]
+kind            = "WineRegistry"
+prefix_path     = "~/.local/share/play/prefixes/sha256abc123"
+key             = "HKCU\\Software\\Wine\\Drivers\\winepulse.drv"
+value_name      = "DefaultSamplesPerSec"
+previous_value  = ""           # key did not exist before
+current_value   = "48000"
+changed_at      = "2025-03-01T14:22:14Z"
+reboot_resets   = false
+undo_strategy   = "registry"
+undo_command    = "wine reg delete HKCU\\... /v DefaultSamplesPerSec /f"
+verified_before = false        # key was absent, not a read-modify-write
 ```
 </state_management>
 
@@ -1197,7 +1382,7 @@ play_version   = "0.1.0"
 
 ## What Must Be Tested
 
-Every agent function that touches /proc, /sys, or external binaries
+Every module function that touches /proc, /sys, or external binaries
 MUST be testable with mocked filesystem content. Design detection functions
 to accept an injectable path root:
 
@@ -1217,8 +1402,10 @@ pub fn read_vm_max_map_count() -> Result<u64, PlayError> {
 
 ## Test Coverage Requirements
 
-- PE analysis: test against fixture binaries for each DX version
+- PE analysis: test against fixture binaries for each DX version (Steps 1–7 in build sequence)
 - Decision engine: unit test every branch with typed inputs
+- vm.max_map_count formula: unit test all four RAM+VRAM tiers
+- NVIDIA clock lock formula: unit test compute_nvidia_lock_clock for known GPU specs
 - Sysctl rollback: verify rollback file written before sysctl changed
 - GovernorGuard: verify restoration on Drop even after panic
 - Database query: test scored matching with partial condition match
@@ -1249,24 +1436,24 @@ strategy:
      strings in path construction without canonicalization and prefix-checking
 
 2. **Compromised runner download** (MITM or CDN compromise)
-   → Mitigation: SHA256 verify every download against a manifest
-     The manifest itself is fetched over TLS from the canonical GitHub release
-     and its hash is pinned in the tool binary for known versions
+   → Mitigation: SHA256 verify every download against runners.toml manifest.
+     The manifest is fetched over TLS from the canonical GitHub release and
+     its hash is pinned in the db cache.
 
 3. **Database entry injection** (malicious PR to play-db)
-   → Mitigation: database entries only mutate GameEnvironment fields
+   → Mitigation: database entries only mutate GameEnvironment fields.
      They cannot execute arbitrary code. No script fields in the schema ever.
-     CI validates every entry against the schema before merge
+     CI validates every entry against the schema before merge.
 
 4. **play-helper privilege escalation**
    → Mitigation: hardcoded command whitelist, hardcoded sysfs path whitelist,
      JSON-only interface, minimal binary, no dynamic dispatch, reviewed on change
 
 5. **State file tampering**
-   → Mitigation: state files are user-owned, in user home dir
-     The tool reads them but validates schema_version and required fields
+   → Mitigation: state files are user-owned, in user home dir.
+     The tool reads them but validates schema_version and required fields.
      A corrupted state file triggers `PlayError::StateCorrupted` with clear
-     recovery instructions, not silent misbehavior
+     recovery instructions, not silent misbehavior.
 
 ## Input Sanitization Rules
 
@@ -1274,9 +1461,9 @@ strategy:
 // Every path derived from external input goes through this:
 pub fn safe_game_path(input: &Path, allowed_root: &Path) -> Result<PathBuf, PlayError> {
     let canonical = input.canonicalize()
-        .map_err(|_| PlayError::BinaryAnalysis { 
-            path: input.into(), 
-            reason: "path does not exist or is not accessible".into() 
+        .map_err(|_| PlayError::BinaryAnalysis {
+            path: input.into(),
+            reason: "path does not exist or is not accessible".into()
         })?;
     if !canonical.starts_with(allowed_root) {
         return Err(PlayError::BinaryAnalysis {
@@ -1292,30 +1479,74 @@ pub fn safe_game_path(input: &Path, allowed_root: &Path) -> Result<PathBuf, Play
 ---
 
 <implementation_guidance>
-# Implementation Guidance for the AI Agent
+# Implementation Guidance
 
-## Start Here — Exact Build Sequence
+## Current Status: Steps 1–3 Complete
 
-Build in this exact order. Do not skip ahead. Each step produces something
-runnable before the next step begins.
+Steps 1–3 of the build sequence are done and passing tests:
+- `models/environment.rs` — all types defined ✓
+- `models/errors.rs` — all PlayError variants ✓
+- `binary/pe.rs` — analyze_binary() with 17+ passing tests ✓
+
+Continue from Step 4.
+
+## Build Sequence — Steps 4 Onward
 
 ```
-Step 1: models/environment.rs — define ALL types. No logic yet.
-Step 2: models/errors.rs — define ALL PlayError variants with messages.
-Step 3: binary/pe.rs — analyze_binary() with goblin. Test against fixtures.
-Step 4: agents/detection.rs — kernel, CPU, GPU, audio detection with injectable paths.
-Step 5: guards/governor.rs — GovernorGuard with Drop. Test the Drop fires on panic.
-Step 6: guards/gpu_perf.rs — GpuPerfGuard with Drop.
-Step 7: agents/planning.rs — decision engine, TweakConstraint checks, ResolutionDecision.
-Step 8: database.rs — local cache loading, scored query algorithm.
-Step 9: agents/execution/packages.rs — PackageAgent with distro detection.
-Step 10: agents/execution/runner.rs — RunnerAgent with download+verify.
-Step 11: agents/execution/prefix.rs — PrefixAgent with Wine prefix setup.
-Step 12: agents/execution/system.rs — SystemAgent with sysctl via play-helper.
-Step 13: play-helper/src/main.rs — minimal privileged binary.
-Step 14: orchestrator.rs — state machine, checkpoint system, agent sequencing.
-Step 15: agents/validation.rs — launch monitoring, GPU activity check.
-Step 16: play-cli/src/main.rs — CLI surface, plan display, user confirmation.
+Step 4: modules/detection.rs
+        — kernel, CPU, GPU, audio detection with injectable paths
+        — NVIDIA: query vbios_max_clock_mhz via nvidia-smi, store in GpuProfile
+        — detect_package_manager() → Box<dyn PackageManager>
+
+Step 5: guards/governor.rs
+        — GovernorGuard with Drop. Test Drop fires on panic.
+
+Step 6: guards/gpu_perf.rs
+        — GpuPerfGuard: Nvidia variant (nvidia-smi -pm 1 + -lgc {computed})
+        — Amd variant returns Noop (Phase 2 stub, zero panic risk)
+        — Drop restores: nvidia-smi -pm 0 + nvidia-smi -rgc
+
+Step 7: tweaks/mod.rs + tweaks/*.rs
+        — TweakRegistry, Tweak struct, TweakDecision
+        — Register all tweaks from system_tweaks_reference
+        — vm_max_map.rs: hardware-proportional formula, not hardcoded
+        — gpu_perf_nvidia.rs: compute_nvidia_lock_clock(vbios_max)
+
+Step 8: modules/planning.rs
+        — Decision engine, TweakConstraint evaluation, ResolutionDecision
+        — Runner version resolution: read runners.toml, apply db floor, select latest
+
+Step 9: database.rs
+        — Local cache loading, scored query algorithm
+        — runners.toml loading and version comparison
+
+Step 10: execution/packages.rs
+         — PackageModule with distro detection
+
+Step 11: execution/runner.rs
+         — RunnerModule: download + SHA256 verify against runners.toml manifest
+
+Step 12: execution/prefix.rs
+         — PrefixModule: Wine prefix setup
+
+Step 13: execution/system.rs
+         — SystemModule: iterates TweakRegistry only — zero tweak-specific logic
+
+Step 14: play-helper/src/main.rs
+         — Minimal privileged binary
+         — Add nvidia_clock_lock and nvidia_clock_reset commands
+
+Step 15: orchestrator.rs
+         — State machine, checkpoint system, module sequencing
+
+Step 16: modules/validation.rs
+         — Launch monitoring, GPU activity check, MangoHud metrics collection
+
+Step 17: play-cli/src/main.rs
+         — CLI surface: clap with all standard flags (--help, --version, --yes,
+           --undo, --update-db, --verbose, --dry-run)
+         — Plan display, user confirmation prompt
+         — Post-session: write metrics.toml on clean exit; prompt --report on crash
 ```
 
 ## Code Quality Non-Negotiables
@@ -1324,10 +1555,10 @@ Step 16: play-cli/src/main.rs — CLI surface, plan display, user confirmation.
 # .cargo/config.toml — enforced from day one
 [build]
 rustflags = [
-    "-D", "warnings",           # warnings are errors
+    "-D", "warnings",
     "-D", "clippy::all",
     "-D", "clippy::pedantic",
-    "-A", "clippy::module_name_repetitions",  # common false positive
+    "-A", "clippy::module_name_repetitions",
 ]
 ```
 
@@ -1357,7 +1588,7 @@ tracing::info!("Set CPU governor to performance for game {}", hash);
 ```
 
 Log levels:
-- `trace`: internal agent state, every file read
+- `trace`: internal module state, every file read
 - `debug`: detection values, decision scoring
 - `info`: every state transition, every tweak applied, game launch
 - `warn`: degraded fallback used, low-confidence database match
@@ -1365,11 +1596,11 @@ Log levels:
 
 ## Dependency Injection Pattern
 
-Every agent takes its dependencies as constructor arguments, never reads
+Every module takes its dependencies as constructor arguments, never reads
 global state. This enables testing with mocked dependencies:
 
 ```rust
-pub struct DetectionAgent {
+pub struct DetectionModule {
     proc_root: PathBuf,   // "/" in production, test fixture path in tests
     sys_root:  PathBuf,
     run_cmd:   Box<dyn CommandRunner>,  // real subprocess | mock in tests
@@ -1378,7 +1609,8 @@ pub struct DetectionAgent {
 
 ## The Plan Display Format
 
-This is what users see before confirming. It must be this clear:
+This is what users see before confirming. A non-technical user must understand it.
+A technical user must find it sufficient for debugging.
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1388,8 +1620,9 @@ This is what users see before confirming. It must be this clear:
 
   CONFIGURATION
   ─────────────────────────────────────────────
-  Runner        ProtonGE 8.26
+  Runner        GE-Proton9-27
                 ↳ Game uses WMF video cutscenes; GE includes required media patches
+                ↳ 9.27 is latest stable (db floor: 9.10)
 
   Translation   VKD3D-Proton 2.11
                 ↳ D3D12 detected in binary imports
@@ -1400,40 +1633,25 @@ This is what users see before confirming. It must be this clear:
   SYSTEM CHANGES  (persistent, reversible with: play --undo CyberpunkGame.exe)
   ─────────────────────────────────────────────
   ~ vm.max_map_count    65530  →  16777216
+    ↳ System class: HX + discrete GPU (33–64GB combined); 8× baseline
+
   ~ sched_autogroup     1      →  0
+    ↳ Wine thread pool competes individually in scheduler
 
   SESSION CHANGES  (automatically restored when game exits)
   ─────────────────────────────────────────────
   ~ CPU governor        schedutil  →  performance
-  ~ GPU perf level      auto       →  high
+  ~ GPU perf mode       adaptive   →  persistence on + clock lock 1680 MHz
+    ↳ RTX 3050 VBIOS max 1777 MHz × 95% = 1688 → rounded to 1680
 
   INSTALLS REQUIRED
   ─────────────────────────────────────────────
-  + ProtonGE-8.26       ~500 MB download
+  + GE-Proton9-27       ~500 MB download
   + gamemode            via dnf
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Proceed? [y/N]  (--yes to skip in scripts)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-## AppImage Handling
-
-AppImages require inspection before deciding what to do:
-
-```rust
-pub enum AppImageContent {
-    NativeLinuxBinary,          // already Linux, just make executable + run
-    BundledWineGame(PathBuf),   // contains a .exe — extract and treat as PE
-    WineRuntime,                // contains Wine itself — use its Wine, not ours
-}
-
-pub fn inspect_appimage(path: &Path) -> Result<AppImageContent, PlayError> {
-    // AppImages are self-mounting ISOs. Mount with `--appimage-mount` or
-    // extract with `--appimage-extract`. Check for .exe files in AppDir.
-    // Check desktop file Exec= line for clues.
-    // If contains Wine binary, flag as WineRuntime — don't double-wrap.
-}
 ```
 
 ## Distro Abstraction
@@ -1446,21 +1664,17 @@ pub trait PackageManager: Send + Sync {
     fn get_package_for(&self, capability: &Capability) -> Option<&'static str>;
 }
 
-// Capability → package name mapping per distro
-// Because "gamemode" on Arch is "gamemode",
-// but on Ubuntu might need a PPA, and on Fedora is "gamemode" too
 pub enum Capability {
     GameMode,
     MangoHud,
     Vulkan,
-    VulkanTools,     // vulkaninfo binary
+    VulkanTools,
     WineBase,
     CabExtract,
-    // ... extend as needed
 }
 
 pub fn detect_package_manager(sys_root: &Path) -> Result<Box<dyn PackageManager>, PlayError> {
-    // Check in order: apt, dnf, pacman, zypper, xbps
+    // Check in order: apt, dnf, pacman, zypper
     // Return first found. Error if none found (unsupported distro).
 }
 ```
@@ -1507,6 +1721,27 @@ pub fn detect_package_manager(sys_root: &Path) -> Result<Box<dyn PackageManager>
 ✗ Different code paths for AMD vs NVIDIA deep in the same function
   → GPU-vendor-specific code lives in separate impl blocks behind a trait.
     The orchestrator never contains vendor conditionals.
+
+✗ Hardcoding a runner version string (e.g. "GE-Proton8-26", "9.10")
+  → Runner version is ALWAYS resolved at plan time from runners.toml.
+    Store the concrete resolved version in ResolutionDecision, never bake
+    a literal version into source code.
+
+✗ Hardcoding vm.max_map_count as 2097152
+  → Use the hardware-proportional formula from decision_logic §8.
+    The correct value depends on combined RAM + VRAM.
+
+✗ Hardcoding nvidia-smi -lgc 1530,1530
+  → 1530 MHz is wrong for most GPUs. Compute from vbios_max_clock_mhz.
+    Use compute_nvidia_lock_clock(vbios_max) from decision_logic §9.
+
+✗ Panicking or erroring on AMD hardware in v1
+  → AMD GPU arms in the TweakRegistry return TweakDecision::NotApplicable.
+    Silent, clean, never an error. Phase 2 will fill them in.
+
+✗ Making any runtime network call for AI inference or decision-making
+  → play is a deterministic binary. All decisions are compiled logic.
+    The play-db cache is the only knowledge source at runtime.
 ```
 </antipatterns>
 
@@ -1515,18 +1750,46 @@ pub fn detect_package_manager(sys_root: &Path) -> Result<Box<dyn PackageManager>
 <first_commit_checklist>
 # Before First Commit Checklist
 
-- [ ] `DESIGN.md` written: Plan→Confirm→Execute, agent contracts, error philosophy
+Steps 1–3 are already complete. The checklist covers the remaining prerequisites
+before the first push to the repository.
+
+## Already Done ✓
+- [x] `models/environment.rs` — all types defined, compiles
+- [x] `models/errors.rs` — all PlayError variants with thiserror messages
+- [x] `binary/pe.rs` — analyze_binary() with 17+ passing tests
+
+## Must Exist Before First Commit
+- [ ] `DESIGN.md` written: Plan→Confirm→Execute, module contracts, error philosophy,
+      explicit statement that this is a deterministic binary with no AI runtime deps
 - [ ] `GPL-3.0` LICENSE file present
-- [ ] Workspace Cargo.toml with all three crates defined
-- [ ] All types in `models/environment.rs` — compile, no logic
-- [ ] All variants in `models/errors.rs` with thiserror messages
+- [ ] Workspace `Cargo.toml` with all three crates defined
 - [ ] `.cargo/config.toml` with `-D warnings` enforced
 - [ ] `rustfmt.toml` configured
 - [ ] `.github/workflows/ci.yml` running `fmt + clippy + test` on PR
-- [ ] `tests/fixtures/` directory with at least one test PE binary
-- [ ] `CONTRIBUTING.md` referencing the database schema repo
-- [ ] `play-db` repository created with schema and CI validator
+- [ ] `.github/workflows/cross-distro.yml` matrix on Ubuntu/Fedora/Arch containers
+- [ ] `tests/fixtures/binaries/` with the full fixture set committed (see below)
+- [ ] `CONTRIBUTING.md` referencing the play-db schema repo
+- [ ] `play-db` repository created with:
+      - `entry.schema.json` with all required fields
+      - `runners.toml` with at least one GE-Proton entry + SHA256
+      - `validate.py` running in GitHub Actions on every PR
+      - One example entry for a known-working NVIDIA game
 - [ ] Git hooks: `cargo fmt --check` on commit
+
+## PE Fixture Set (commit before writing any more detection logic)
+
+Minimum required fixtures in `tests/fixtures/binaries/`:
+- `d3d9_32bit.exe`      — known D3D9, x86
+- `d3d11_64bit.exe`     — known D3D11, x86_64
+- `d3d12_64bit.exe`     — known D3D12, x86_64
+- `vulkan_64bit.exe`    — known Vulkan, x86_64
+- `eac_present.exe`     — has EasyAntiCheat imports
+- `bink_video.exe`      — has Bink/RAD imports (WMF signal)
+- `no_imports.exe`      — no recognized imports (Unknown case — must not crash)
+
+These must be legally distributable: free game demos, public domain
+software, or purpose-built minimal PE files. Commit fixtures BEFORE
+writing further detection or planning logic.
 
 This is your foundation. Everything else is built on top of it.
 The architecture is load-bearing. The types are the design.
