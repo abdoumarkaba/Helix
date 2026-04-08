@@ -1,0 +1,8 @@
+# Fixture DB entry for integration tests
+runner_version_min = "9.20.0"
+windows_version_override = "Win10"
+notes = "Fixture entry for planning integration tests."
+
+[[dll_overrides]]
+dll = "d3d9"
+mode = "native,builtin"

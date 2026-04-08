@@ -77,4 +77,25 @@ pub enum PlayError {
          detected {available_mb}MB"
     )]
     InsufficientVram { required_mb: u32, available_mb: u32 },
+
+    #[error(
+        "play-db entry for {hash} is corrupted: {reason}. \
+         Delete the entry and run `play --update-db`."
+    )]
+    DatabaseCorrupted { hash: String, reason: String },
+
+    #[error("runners.toml not found at {path}. Run `play --update-db` to fetch it.")]
+    RunnersManifestMissing { path: PathBuf },
+
+    #[error(
+        "No {runner_type} runner satisfies version floor {version_min}. \
+         Run `play --update-db` to refresh the runner manifest."
+    )]
+    NoRunnerAvailable {
+        runner_type: String,
+        version_min: String,
+    },
+
+    #[error("Planning failed: {reason}")]
+    PlanningFailed { reason: String },
 }

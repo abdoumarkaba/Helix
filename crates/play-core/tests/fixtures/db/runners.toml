@@ -1,0 +1,17 @@
+[[runners]]
+runner_type = "ProtonGE"
+version = "9.27.0"
+url = "https://example.com/GE-Proton9-27.tar.gz"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[[runners]]
+runner_type = "ProtonGE"
+version = "9.20.0"
+url = "https://example.com/GE-Proton9-20.tar.gz"
+sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+[[runners]]
+runner_type = "WineGE"
+version = "8.26.0"
+url = "https://example.com/wine-ge-proton8-26.tar.gz"
+sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
