@@ -1,5 +1,5 @@
 # PLAY — Master Project Brief
-## For: Claude Sonnet 4.6 Extended Thinking | Project Rules
+## Windsurf Project Rules
 
 ---
 
