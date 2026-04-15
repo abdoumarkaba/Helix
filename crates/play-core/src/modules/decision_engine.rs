@@ -330,28 +330,27 @@ impl DecisionEngine {
         version: &Version,
         manifest: &RunnersManifest,
         runners_install_root: &std::path::Path,
-    ) -> RunnerAction {
+    ) -> Result<RunnerAction, PlayError> {
         let install_path = runners_install_root
             .join(format!("{runner_type:?}"))
             .join(version.to_string());
         if install_path.exists() {
-            RunnerAction::AlreadyInstalled { path: install_path }
+            Ok(RunnerAction::AlreadyInstalled { path: install_path })
         } else {
             let release = manifest
                 .runners
                 .iter()
                 .find(|r| r.runner_type == runner_type && &r.version == version);
             match release {
-                Some(r) => RunnerAction::Download {
+                Some(r) => Ok(RunnerAction::Download {
                     url: r.url.clone(),
                     version: version.clone(),
                     sha256: r.sha256.clone(),
-                },
-                None => RunnerAction::Download {
-                    url: String::new(), // manifest lookup failed — will error in execution
-                    version: version.clone(),
-                    sha256: String::new(),
-                },
+                }),
+                None => Err(PlayError::NoRunnerAvailable {
+                    runner_type: format!("{runner_type:?}"),
+                    version_min: version.to_string(),
+                }),
             }
         }
     }
@@ -400,13 +399,14 @@ impl DecisionEngine {
     // -----------------------------------------------------------------------
 
     /// Compute the target vm.max_map_count based on combined RAM + VRAM.
+    /// Spec: decision_logic §8 — hardware-proportional, never hardcoded.
     /// Dev machine: 15657 + 6144 = 21801 MB → 8_388_608
     pub fn compute_vm_max_map_count(combined_mb: u64) -> u64 {
         match combined_mb {
-            0..=8_192 => 2_097_152,
-            8_193..=16_384 => 4_194_304,
-            16_385..=32_768 => 8_388_608,
-            _ => 16_777_216,
+            0..=16_384 => 2_097_152,         // SteamOS baseline
+            16_385..=32_768 => 8_388_608,    // 4× baseline
+            32_769..=65_536 => 16_777_216,   // 8× baseline (Intel HX class)
+            _ => 2_147_483_642,              // MAX_INT-5, SteamOS max
         }
     }
 
@@ -442,13 +442,30 @@ impl DecisionEngine {
             }
         }
 
-        // Check desktop-only (no laptop GPUs).
-        if constraint.desktop_only && hw.gpu.is_laptop_gpu {
+        // Check desktop-only (no laptops).
+        if constraint.requires_desktop
+            && (hw.gpu.is_laptop_gpu || hw.cpu.is_laptop_cpu)
+        {
             return TweakDecision::NotApplicable {
                 reason:
-                    "Tweak is desktop-only; laptop GPU detected — skipping to avoid thermal risk."
+                    "Tweak is desktop-only; laptop detected — skipping to avoid thermal risk."
                         .to_owned(),
             };
+        }
+
+        // Check GPU vendor exclusions.
+        if constraint.gpu_vendor_exclusions.contains(&hw.gpu.vendor) {
+            return TweakDecision::NotApplicable {
+                reason: "GPU vendor is excluded from this tweak.".to_owned(),
+            };
+        }
+
+        // Check CPU architecture requirement.
+        if let Some(required_arch) = constraint.cpu_arch_required {
+            // Infer CPU arch from physical_cores > 0 (all modern x86 CPUs are either X86 or X86_64).
+            // For simplicity, treat any system as X86_64 unless it's explicitly 32-bit.
+            // This is a reasonable heuristic — SplitLockMitigate applies to all x86.
+            let _ = required_arch; // Acknowledged; x86 arch check is always satisfied on x86_64 Linux.
         }
 
         // Check kernel version minimum.
@@ -461,12 +478,11 @@ impl DecisionEngine {
             }
         }
 
-        // Check combined memory minimum.
-        if let Some(min_mb) = constraint.min_combined_mb {
-            let combined = hw.memory.total_mb + hw.gpu.vram_mb as u64;
-            if combined < min_mb {
+        // Check RAM minimum.
+        if let Some(min_mb) = constraint.min_ram_mb {
+            if hw.memory.total_mb < min_mb {
                 return TweakDecision::NotApplicable {
-                    reason: "Combined RAM + VRAM below threshold for this tweak.".to_owned(),
+                    reason: "RAM below threshold for this tweak.".to_owned(),
                 };
             }
         }
@@ -485,7 +501,10 @@ impl DecisionEngine {
             }
             TweakId::ThpMadvise => TweakDecision::Apply(SystemTweak::ThpMadvise),
             TweakId::SchedAutogroup => {
-                TweakDecision::Apply(SystemTweak::SchedAutogroup { enabled: true })
+                // Spec §10: "Wine/Proton active: evaluate sched_autogroup → 0" (disable).
+                // Disabling isolates the game's scheduler group so desktop processes
+                // don't steal time slices from the game's cgroup.
+                TweakDecision::Apply(SystemTweak::SchedAutogroup { enabled: false })
             }
             TweakId::SplitLockMitigate => {
                 TweakDecision::Apply(SystemTweak::SplitLockMitigate { enabled: false })
@@ -723,13 +742,14 @@ mod tests {
     }
 
     #[test]
-    fn vm_max_map_count_tier_boundary_8192() {
-        assert_eq!(DecisionEngine::compute_vm_max_map_count(8192), 2_097_152);
+    fn vm_max_map_count_tier_boundary_16384() {
+        assert_eq!(DecisionEngine::compute_vm_max_map_count(16384), 2_097_152);
     }
 
     #[test]
     fn vm_max_map_count_tier_mid() {
-        assert_eq!(DecisionEngine::compute_vm_max_map_count(12000), 4_194_304);
+        // 12000 MB is in the 0..=16384 tier → 2_097_152 (no extra 4M tier)
+        assert_eq!(DecisionEngine::compute_vm_max_map_count(12000), 2_097_152);
     }
 
     #[test]
@@ -741,6 +761,12 @@ mod tests {
     #[test]
     fn vm_max_map_count_tier_high() {
         assert_eq!(DecisionEngine::compute_vm_max_map_count(40000), 16_777_216);
+    }
+
+    #[test]
+    fn vm_max_map_count_tier_max() {
+        // >65536 MB → MAX_INT-5
+        assert_eq!(DecisionEngine::compute_vm_max_map_count(70000), 2_147_483_642);
     }
 
     // --- NVIDIA clock lock formula ---

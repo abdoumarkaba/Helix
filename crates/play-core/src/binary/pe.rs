@@ -37,8 +37,9 @@ pub fn analyze_binary(path: &Path) -> Result<BinaryAnalysis, PlayError> {
         reason: format!("failed to read file: {e}"),
     })?;
 
-    // Hash before parsing — we need it regardless of parse success
-    let hash = format!("sha256:{:x}", Sha256::digest(&bytes));
+    // Hash before parsing — we need it regardless of parse success.
+    // Raw hex only — no "sha256:" prefix. The field is already named exe_hash.
+    let hash = format!("{:x}", Sha256::digest(&bytes));
 
     let pe = PE::parse(&bytes).map_err(|e| PlayError::BinaryAnalysis {
         path: path.into(),
@@ -435,7 +436,7 @@ mod tests {
         let result = analyze_pe_bytes(&pe).expect("analysis should succeed");
         assert_eq!(result.dx_version, DirectXVersion::D3D12);
         assert_eq!(result.pe_arch, PeArchitecture::X86);
-        assert!(result.hash.starts_with("sha256:"));
+        assert!(!result.hash.contains(':'), "hash should be raw hex without prefix");
     }
 
     #[test]

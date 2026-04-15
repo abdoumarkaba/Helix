@@ -413,6 +413,12 @@ pub enum GpuPerfMode {
     Low,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CpuArch {
+    X86,
+    X86_64,
+}
+
 // ---------------------------------------------------------------------------
 // LaunchConfig
 // ---------------------------------------------------------------------------

@@ -141,16 +141,22 @@ pub enum RiskLevel {
 pub struct TweakConstraint {
     pub id: TweakId,
     pub class: TweakClass,
-    /// Tweak skipped (NotApplicable) if (total_ram_mb + vram_mb) < this.
-    pub min_combined_mb: Option<u64>,
+    /// Tweak skipped (NotApplicable) if total RAM < this (MB).
+    pub min_ram_mb: Option<u64>,
     /// Tweak skipped if kernel version < (major, minor).
     pub kernel_version_min: Option<(u32, u32)>,
     /// Only applicable for this GPU vendor (None = any vendor).
     pub gpu_vendor_required: Option<GpuVendor>,
-    /// If true: is_laptop_gpu = true → NotApplicable (no thermal-risky tweaks on laptops).
-    pub desktop_only: bool,
+    /// GPU vendors explicitly excluded from this tweak.
+    pub gpu_vendor_exclusions: Vec<GpuVendor>,
+    /// Only applicable on this CPU architecture (None = any arch).
+    pub cpu_arch_required: Option<crate::models::environment::CpuArch>,
+    /// If true: is_laptop = true → NotApplicable (no thermal-risky tweaks on laptops).
+    pub requires_desktop: bool,
     pub reversible: bool,
     pub reboot_required: bool,
+    /// If true, the tweak's effect is reset on reboot (e.g. sysctl).
+    pub reboot_resets: bool,
     pub risk_level: RiskLevel,
     pub rationale: &'static str,
 }

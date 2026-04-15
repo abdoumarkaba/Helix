@@ -83,7 +83,7 @@ impl<'a> PlanBuilder<'a> {
             &runner_version,
             &manifest,
             &self.runners_install_root,
-        );
+        )?;
 
         // --- 7. Sync mode ---
         let (fsync, esync, dec) = DecisionEngine::select_sync_mode(&self.env.hardware.kernel);
@@ -153,6 +153,11 @@ impl<'a> PlanBuilder<'a> {
         // Fill system tuning
         for t in &tweaks {
             apply_tweak_to_system(&mut env.system, t);
+        }
+
+        // Spec Class A: "PROTON_NO_ESYNC | set when using fsync | prevents double-activation"
+        if fsync {
+            env.launch.env.insert("PROTON_NO_ESYNC".to_owned(), "1".to_owned());
         }
 
         // Record all decisions in metadata
