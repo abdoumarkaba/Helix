@@ -396,6 +396,9 @@ pub struct SystemTuning {
     pub esync: bool,
     pub fsync: bool,
     pub gamemode: bool,
+    /// NVIDIA clock lock value in MHz (95% of VBIOS max, rounded to 15 MHz step).
+    /// Stored here for audit trail; applied via play-helper.
+    pub nvidia_clock_lock_mhz: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

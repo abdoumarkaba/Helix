@@ -7,9 +7,9 @@
 use semver::Version;
 
 use crate::models::environment::{
-    AntiCheat, AudioBackend, Confidence, DecisionSource, DirectXVersion, KernelProfile,
-    PeArchitecture, ResolutionDecision, RunnerType, TranslationLayer, WindowsVersion, WineArch,
-    WineAudioDriver,
+    AntiCheat, AudioBackend, Confidence, DecisionSource, DirectXVersion, GameEngine,
+    GameIdentity, KernelProfile, PeArchitecture, ResolutionDecision, RunnerType,
+    TranslationLayer, WindowsVersion, WineArch, WineAudioDriver,
 };
 use crate::models::errors::PlayError;
 use crate::models::plan::{
@@ -141,6 +141,7 @@ impl DecisionEngine {
         _anti_cheat: &[AntiCheat],
         db: Option<&DbEntry>,
         manifest: &RunnersManifest,
+        identity: &GameIdentity,
     ) -> Result<(RunnerType, Version, ResolutionDecision), PlayError> {
         // DB can override runner type (e.g. wine-ge for very old 32-bit games).
         let runner_type = db
@@ -177,6 +178,23 @@ impl DecisionEngine {
             ""
         };
 
+        // Identity signals that strengthen the ProtonGE choice
+        let identity_reason = if identity.has_video_cutscenes == Some(true) {
+            Some("video cutscenes detected (Bink/WMF patches in ProtonGE)")
+        } else if identity.engine_hint == Some(GameEngine::REEngine) {
+            Some("RE Engine detected (ProtonGE has RE Engine patches)")
+        } else if identity.dx_version == DirectXVersion::D3D12 {
+            Some("D3D12 detected (ProtonGE has best VKD3D integration)")
+        } else if identity.pe_arch == PeArchitecture::X86 {
+            Some("32-bit binary (ProtonGE has 32-bit prefix support)")
+        } else {
+            None
+        };
+
+        let reason_suffix = identity_reason
+            .map(|r| format!("; {r}"))
+            .unwrap_or_default();
+
         Ok((
             runner_type,
             best.version.clone(),
@@ -184,7 +202,7 @@ impl DecisionEngine {
                 field: "runner.runner_type + runner.version".to_owned(),
                 chosen: format!("{runner_type:?} {}", best.version),
                 reason: format!(
-                    "{source_note}ProtonGE is the default (broadest game compatibility); \
+                    "{source_note}ProtonGE is the default (broadest game compatibility){reason_suffix}; \
                      version {} is highest available above floor.",
                     best.version
                 ),
@@ -202,13 +220,23 @@ impl DecisionEngine {
     // Windows version
     // -----------------------------------------------------------------------
 
-    pub fn select_windows_version(db: Option<&DbEntry>) -> (WindowsVersion, ResolutionDecision) {
+    pub fn select_windows_version(
+        db: Option<&DbEntry>,
+        dx_version: DirectXVersion,
+    ) -> (WindowsVersion, ResolutionDecision) {
         let (version, reason, source) =
             if let Some(ov) = db.and_then(|d| d.windows_version_override) {
                 (
                     ov,
                     "play-db specifies Windows version for this game.",
                     DecisionSource::Database,
+                )
+            } else if dx_version == DirectXVersion::D3D9 {
+                // Some old D3D9 games reject Win10; Win7 has better compatibility.
+                (
+                    WindowsVersion::Win7,
+                    "D3D9 game detected; Windows 7 avoids compatibility rejections from old titles.",
+                    DecisionSource::Heuristic,
                 )
             } else {
                 (
@@ -416,9 +444,10 @@ impl DecisionEngine {
     // -----------------------------------------------------------------------
 
     /// Compute the NVIDIA lock clock as 95% of VBIOS max, rounded down to nearest 15 MHz.
-    /// RTX 3050: vbios_max = 1777 → 1688 → (1688 / 15) * 15 = 112 * 15 = 1680 MHz
+    /// Uses integer arithmetic to avoid f32 precision loss.
+    /// RTX 3050: vbios_max = 1777 → (1777*95)/100 = 1688 → (1688/15)*15 = 1680 MHz
     pub fn compute_nvidia_lock_clock(vbios_max_mhz: u32) -> u32 {
-        let ninety_five_pct = (vbios_max_mhz as f32 * 0.95) as u32;
+        let ninety_five_pct = (vbios_max_mhz * 95) / 100;
         (ninety_five_pct / 15) * 15
     }
 
@@ -922,5 +951,45 @@ mod tests {
     fn alsa_selects_alsa_driver() {
         let (driver, _) = DecisionEngine::select_audio_driver(AudioBackend::ALSA);
         assert_eq!(driver, WineAudioDriver::Alsa);
+    }
+
+    // --- windows version ---
+
+    #[test]
+    fn d3d9_without_db_selects_win7() {
+        let (version, dec) =
+            DecisionEngine::select_windows_version(None, DirectXVersion::D3D9);
+        assert_eq!(version, WindowsVersion::Win7);
+        assert!(dec.reason.contains("D3D9"));
+    }
+
+    #[test]
+    fn d3d11_without_db_selects_win10() {
+        let (version, _) =
+            DecisionEngine::select_windows_version(None, DirectXVersion::D3D11);
+        assert_eq!(version, WindowsVersion::Win10);
+    }
+
+    #[test]
+    fn d3d12_without_db_selects_win10() {
+        let (version, _) =
+            DecisionEngine::select_windows_version(None, DirectXVersion::D3D12);
+        assert_eq!(version, WindowsVersion::Win10);
+    }
+
+    // --- laptop cpu skips desktop-only tweaks ---
+
+    #[test]
+    fn laptop_cpu_skips_cpu_governor_performance() {
+        let hw = make_hw(GpuVendor::NVIDIA, true, Some(1777));
+        let constraint = super::super::tweak_registry::all()
+            .iter()
+            .find(|c| c.id == TweakId::CpuGovernorPerformance)
+            .unwrap();
+        let decision = DecisionEngine::resolve_tweak(constraint, &hw, 65536);
+        assert!(
+            matches!(decision, TweakDecision::NotApplicable { .. }),
+            "CpuGovernorPerformance should be NotApplicable on laptop CPU"
+        );
     }
 }

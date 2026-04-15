@@ -182,9 +182,18 @@ pub fn detect_kernel(proc_root: &Path, sys_root: &Path) -> Result<KernelProfile,
 // ---------------------------------------------------------------------------
 
 /// Detect whether a battery is present — used to gate laptop-only tweaks.
+/// Reads the content of /sys/class/power_supply/BAT{0,1}/present and checks for "1".
+/// Some systems create the file with content "0" when no battery is present.
 fn is_laptop(sys_root: &Path) -> bool {
-    sys_root.join("class/power_supply/BAT0/present").exists()
-        || sys_root.join("class/power_supply/BAT1/present").exists()
+    for bat in ["BAT0", "BAT1"] {
+        let path = sys_root.join(format!("class/power_supply/{bat}/present"));
+        if let Ok(content) = fs::read_to_string(&path) {
+            if content.trim() == "1" {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Read CPU info from /proc/cpuinfo and build a [`CpuProfile`].
@@ -287,8 +296,53 @@ pub fn detect_cpu(proc_root: &Path, sys_root: &Path) -> Result<CpuProfile, PlayE
 // Memory detection
 // ---------------------------------------------------------------------------
 
-/// Detect system memory using sysinfo.
-pub fn detect_memory() -> MemoryProfile {
+/// Detect system memory. Reads /proc/meminfo from `proc_root` first,
+/// falls back to `sysinfo` crate if the file is unavailable.
+pub fn detect_memory(proc_root: &Path) -> MemoryProfile {
+    let meminfo_path = proc_root.join("meminfo");
+    if let Ok(contents) = fs::read_to_string(&meminfo_path) {
+        let mut total_kb: Option<u64> = None;
+        let mut available_kb: Option<u64> = None;
+        let mut swap_total_kb: Option<u64> = None;
+
+        for line in contents.lines() {
+            if line.starts_with("MemTotal:") {
+                total_kb = line
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|v| v.parse().ok());
+            } else if line.starts_with("MemAvailable:") {
+                available_kb = line
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|v| v.parse().ok());
+            } else if line.starts_with("SwapTotal:") {
+                swap_total_kb = line
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|v| v.parse().ok());
+            }
+        }
+
+        if let (Some(total), Some(avail), Some(swap)) = (total_kb, available_kb, swap_total_kb) {
+            let total_mb = total / 1024;
+            let available_mb = avail / 1024;
+            let swap_total_mb = swap / 1024;
+
+            info!(
+                total_mb,
+                available_mb, swap_total_mb, "memory detection complete (meminfo)"
+            );
+
+            return MemoryProfile {
+                total_mb,
+                available_mb,
+                swap_total_mb,
+            };
+        }
+    }
+
+    // Fallback to sysinfo
     let mut sys = System::new_all();
     sys.refresh_memory();
 
@@ -298,7 +352,7 @@ pub fn detect_memory() -> MemoryProfile {
 
     info!(
         total_mb,
-        available_mb, swap_total_mb, "memory detection complete"
+        available_mb, swap_total_mb, "memory detection complete (sysinfo fallback)"
     );
 
     MemoryProfile {
@@ -372,24 +426,25 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Result<GpuProfile, Pl
 }
 
 /// Enrich NVIDIA GPU profile with nvidia-smi data.
+/// Returns `Ok(())` even on nvidia-smi failure — this is an expected
+/// degradation on headless systems or driverless setups, not a hard error.
 pub fn enrich_nvidia_gpu(
     gpu: &mut GpuProfile,
     cmd_runner: &dyn CommandRunner,
-) -> Result<(), PlayError> {
-    let query_output = cmd_runner
-        .run_command(
-            "nvidia-smi",
-            &[
-                "--query-gpu=clocks.max.gr,memory.total,driver_version",
-                "--format=csv,noheader",
-            ],
-        )
-        .map_err(|_| {
-            warn!("nvidia-smi query failed, using safe defaults");
-            PlayError::HardwareDetection {
-                component: "nvidia-smi".into(),
-            }
-        })?;
+) -> Result<(), String> {
+    let query_output = match cmd_runner.run_command(
+        "nvidia-smi",
+        &[
+            "--query-gpu=clocks.max.gr,memory.total,driver_version",
+            "--format=csv,noheader",
+        ],
+    ) {
+        Ok(output) => output,
+        Err(e) => {
+            warn!("nvidia-smi query failed, using safe defaults: {e}");
+            return Ok(());
+        }
+    };
 
     let parts: Vec<&str> = query_output.trim().split(',').collect();
     if parts.len() >= 3 {
@@ -429,16 +484,18 @@ pub fn enrich_intel_gpu(_gpu: &mut GpuProfile) {
 // ---------------------------------------------------------------------------
 
 /// Detect audio backend: `PipeWire`, `PulseAudio`, or `ALSA`.
+/// Queries the actual server sample rate instead of hardcoding 48000.
 pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
     // Check for PipeWire
     if cmd_runner
         .run_command("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"])
         .is_ok()
     {
-        info!("audio backend: PipeWire detected");
+        let rate = parse_pipewire_rate(cmd_runner).unwrap_or(48000);
+        info!("audio backend: PipeWire detected, rate={rate}");
         return AudioConfig {
             backend: AudioBackend::PipeWire,
-            server_rate: 48000,
+            server_rate: rate,
             wine_driver: WineAudioDriver::Pulse,
             latency_ms: None,
         };
@@ -449,10 +506,11 @@ pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
         .run_command("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])
         .is_ok()
     {
-        info!("audio backend: PulseAudio detected");
+        let rate = parse_pulse_rate(cmd_runner).unwrap_or(48000);
+        info!("audio backend: PulseAudio detected, rate={rate}");
         return AudioConfig {
             backend: AudioBackend::PulseAudio,
-            server_rate: 48000,
+            server_rate: rate,
             wine_driver: WineAudioDriver::Pulse,
             latency_ms: None,
         };
@@ -468,15 +526,85 @@ pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
     }
 }
 
+/// Try to parse the default sample rate from `pw-dump` (PipeWire).
+fn parse_pipewire_rate(cmd_runner: &dyn CommandRunner) -> Option<u32> {
+    let output = cmd_runner.run_command("pw-dump", &[]).ok()?;
+    // Look for "rate": <number> in JSON-like output
+    for line in output.lines() {
+        if let Some(rate) = line.split('"').nth(1).and_then(|_| {
+            // Find "rate": <number> pattern
+            if line.contains("\"rate\"") {
+                line.split(':')
+                    .nth(1)
+                    .and_then(|v| v.trim().trim_end_matches(',').parse().ok())
+            } else {
+                None
+            }
+        }) {
+            return Some(rate);
+        }
+    }
+    None
+}
+
+/// Try to parse the default sample rate from `pactl info` (PulseAudio).
+fn parse_pulse_rate(cmd_runner: &dyn CommandRunner) -> Option<u32> {
+    let output = cmd_runner.run_command("pactl", &["info"]).ok()?;
+    for line in output.lines() {
+        if line.contains("Sample Specification") {
+            // e.g. "Sample Specification: s16le 2ch 48000Hz"
+            if let Some(hz_part) = line.rsplit(' ').next() {
+                if let Ok(rate) = hz_part.trim_end_matches("Hz").parse() {
+                    return Some(rate);
+                }
+            }
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Display detection
 // ---------------------------------------------------------------------------
 
 /// Detect display server and resolution.
-pub fn detect_display(cmd_runner: &dyn CommandRunner) -> DisplayProfile {
-    let display_server = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        DisplayServer::Wayland
-    } else if std::env::var("DISPLAY").is_ok() {
+/// `wayland_display` and `x_display` are the values of $WAYLAND_DISPLAY and $DISPLAY
+/// respectively, injected for testability.
+pub fn detect_display(
+    cmd_runner: &dyn CommandRunner,
+    wayland_display: Option<&str>,
+    x_display: Option<&str>,
+) -> DisplayProfile {
+    if wayland_display.is_some() {
+        // Try wlr-randr for Wayland resolution
+        if let Ok(output) = cmd_runner.run_command("wlr-randr", &[]) {
+            for line in output.lines() {
+                // wlr-randr output: "  1920x1080, current ..."
+                if line.contains("current") {
+                    if let Some(res_part) = line.split_whitespace().next() {
+                        if let Some((w_str, h_str)) = res_part.split_once('x') {
+                            if let (Ok(w), Ok(h)) = (w_str.parse::<u32>(), h_str.parse::<u32>()) {
+                                info!(display_server = "Wayland", w, h, "display detection");
+                                return DisplayProfile {
+                                    server: DisplayServer::Wayland,
+                                    primary_res: (w, h),
+                                    refresh_hz: 60.0,
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        info!(display_server = "Wayland", "display detection (no wlr-randr resolution)");
+        return DisplayProfile {
+            server: DisplayServer::Wayland,
+            primary_res: (1920, 1080),
+            refresh_hz: 60.0,
+        };
+    }
+
+    if x_display.is_some() {
         // Try to use xrandr for primary resolution on X11
         if let Ok(output) = cmd_runner.run_command("xrandr", &["--current"]) {
             // Look for primary connected monitor
@@ -485,7 +613,7 @@ pub fn detect_display(cmd_runner: &dyn CommandRunner) -> DisplayProfile {
                     if let Some(res_part) = line.split_whitespace().nth(3) {
                         if let Some((width, height)) = res_part.split_once('x') {
                             if let (Ok(w), Ok(h)) = (width.parse::<u32>(), height.parse::<u32>()) {
-                                info!(display_server = "X11", width, height, "display detection");
+                                info!(display_server = "X11", w, h, "display detection");
                                 return DisplayProfile {
                                     server: DisplayServer::X11,
                                     primary_res: (w, h),
@@ -497,18 +625,17 @@ pub fn detect_display(cmd_runner: &dyn CommandRunner) -> DisplayProfile {
                 }
             }
         }
-        DisplayServer::X11
-    } else {
-        DisplayServer::Unknown
-    };
+        info!(display_server = "X11", "display detection (no xrandr resolution)");
+        return DisplayProfile {
+            server: DisplayServer::X11,
+            primary_res: (1920, 1080),
+            refresh_hz: 60.0,
+        };
+    }
 
-    info!(
-        server = ?display_server,
-        "display server detection complete"
-    );
-
+    info!(display_server = "Unknown", "display detection");
     DisplayProfile {
-        server: display_server,
+        server: DisplayServer::Unknown,
         primary_res: (1920, 1080),
         refresh_hz: 60.0,
     }
@@ -573,23 +700,30 @@ pub fn detect_distro(etc_root: &Path) -> Result<DistroInfo, PlayError> {
 // Top-level detection orchestrator
 // ---------------------------------------------------------------------------
 
-/// Detect all hardware components and return a complete [`HardwareProfile`].
+/// Result of full hardware + audio detection.
+/// Audio is returned separately because it feeds `AudioConfig`, not `HardwareProfile`.
+pub struct DetectionResult {
+    pub hw: HardwareProfile,
+    pub audio: AudioConfig,
+}
+
+/// Detect all hardware components and return a complete [`DetectionResult`].
 pub fn detect_hardware(
     proc_root: &Path,
     sys_root: &Path,
     etc_root: &Path,
     cmd_runner: &dyn CommandRunner,
-) -> Result<HardwareProfile, PlayError> {
+) -> Result<DetectionResult, PlayError> {
     let kernel = detect_kernel(proc_root, sys_root)?;
     let cpu = detect_cpu(proc_root, sys_root)?;
-    let memory = detect_memory();
+    let memory = detect_memory(proc_root);
 
     // GPU detection: base + vendor enrichment
     let mut gpu = detect_gpu_lspci(cmd_runner)?;
     match gpu.vendor {
         GpuVendor::NVIDIA => {
             if let Err(e) = enrich_nvidia_gpu(&mut gpu, cmd_runner) {
-                warn!("nvidia gpu enrichment failed: {:?}", e);
+                warn!("nvidia gpu enrichment failed: {e}");
             }
         }
         GpuVendor::AMD => {
@@ -604,8 +738,12 @@ pub fn detect_hardware(
     // Check if GPU is a laptop GPU
     gpu.is_laptop_gpu = is_laptop(sys_root);
 
-    let _audio = detect_audio(cmd_runner);
-    let display = detect_display(cmd_runner);
+    let audio = detect_audio(cmd_runner);
+    let display = detect_display(
+        cmd_runner,
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("DISPLAY").ok().as_deref(),
+    );
     let distro = detect_distro(etc_root)?;
 
     info!(
@@ -613,13 +751,16 @@ pub fn detect_hardware(
         cpu.vendor as i32, gpu.vendor as i32, distro.distro as i32
     );
 
-    Ok(HardwareProfile {
-        gpu,
-        cpu,
-        memory,
-        kernel,
-        display,
-        distro,
+    Ok(DetectionResult {
+        hw: HardwareProfile {
+            gpu,
+            cpu,
+            memory,
+            kernel,
+            display,
+            distro,
+        },
+        audio,
     })
 }
 
@@ -688,7 +829,7 @@ mod tests {
 
     #[test]
     fn test_detect_memory() {
-        let mem = detect_memory();
+        let mem = detect_memory(Path::new("/proc"));
         assert!(mem.total_mb > 0);
     }
 

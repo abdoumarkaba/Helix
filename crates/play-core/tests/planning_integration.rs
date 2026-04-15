@@ -136,6 +136,7 @@ fn base_env(dx: DirectXVersion, pe_arch: PeArchitecture) -> GameEnvironment {
             esync: false,
             fsync: false,
             gamemode: false,
+            nvidia_clock_lock_mhz: None,
         },
         launch: LaunchConfig {
             exe_path: PathBuf::from("/tmp/test_game.exe"),

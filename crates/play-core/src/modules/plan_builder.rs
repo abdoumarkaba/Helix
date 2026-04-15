@@ -75,6 +75,7 @@ impl<'a> PlanBuilder<'a> {
             &self.env.identity.anti_cheat,
             db_entry.as_ref(),
             &manifest,
+            &self.env.identity,
         )?;
         decisions.push(dec);
 
@@ -97,7 +98,10 @@ impl<'a> PlanBuilder<'a> {
         let (prefix_arch, dec) = DecisionEngine::select_prefix_arch(self.env.identity.pe_arch);
         decisions.push(dec);
 
-        let (windows_version, dec) = DecisionEngine::select_windows_version(db_entry.as_ref());
+        let (windows_version, dec) = DecisionEngine::select_windows_version(
+            db_entry.as_ref(),
+            self.env.identity.dx_version,
+        );
         decisions.push(dec);
 
         let (prefix_action, dec) = DecisionEngine::resolve_prefix_action(
@@ -160,6 +164,26 @@ impl<'a> PlanBuilder<'a> {
             env.launch.env.insert("PROTON_NO_ESYNC".to_owned(), "1".to_owned());
         }
 
+        // Spec §12: WINE_LARGE_ADDRESS_AWARE for 32-bit binaries with >2GB VRAM
+        if self.env.identity.pe_arch == crate::models::environment::PeArchitecture::X86
+            && self.env.hardware.gpu.vram_mb > 2048
+        {
+            env.launch.env.insert(
+                "WINE_LARGE_ADDRESS_AWARE".to_owned(),
+                "1".to_owned(),
+            );
+        }
+
+        // Spec §11: VKD3D_FEATURE_LEVEL when VKD3D-Proton is selected
+        if translation_layer == crate::models::environment::TranslationLayer::Vkd3dProton {
+            if let Some(ref fl) = self.env.hardware.gpu.features.dx12_feature_level {
+                env.launch.env.insert(
+                    "VKD3D_FEATURE_LEVEL".to_owned(),
+                    format!("12_{}", fl),
+                );
+            }
+        }
+
         // Record all decisions in metadata
         env.metadata.decisions = decisions;
         if db_hit {
@@ -216,9 +240,15 @@ impl<'a> PlanBuilder<'a> {
                     }
                 }
                 TweakId::DxvkAsync => {
-                    TweakDecision::Apply(crate::models::plan::SystemTweak::DxvkAsync {
-                        enabled: async_compile,
-                    })
+                    if async_compile {
+                        TweakDecision::Apply(crate::models::plan::SystemTweak::DxvkAsync {
+                            enabled: true,
+                        })
+                    } else {
+                        TweakDecision::NotApplicable {
+                            reason: "Anti-cheat present; async shader compilation disabled.".to_owned(),
+                        }
+                    }
                 }
                 _ => DecisionEngine::resolve_tweak(constraint, hw, current_vm),
             };
@@ -353,9 +383,11 @@ fn apply_tweak_to_system(system: &mut SystemTuning, t: &PlannedTweak) {
                 system.gamemode = true;
             }
             SystemTweak::NvidiaPersistenceMode
-            | SystemTweak::NvidiaClockLock { .. }
             | SystemTweak::DxvkAsync { .. } => {
                 // Handled by GraphicsConfig or written by SystemModule directly.
+            }
+            SystemTweak::NvidiaClockLock { max_mhz, .. } => {
+                system.nvidia_clock_lock_mhz = Some(*max_mhz);
             }
         }
     }

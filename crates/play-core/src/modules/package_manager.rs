@@ -241,40 +241,39 @@ impl PackageManager for ZypperPm {
 /// Detect the available package manager and return the appropriate implementation.
 ///
 /// Checks in order: apt, dnf, pacman, zypper. Returns the first found.
+/// Uses `cmd_runner` for testability instead of calling `Command::new` directly.
 /// Returns an error only if no supported package manager is found.
-pub fn detect_package_manager() -> Result<Box<dyn PackageManager>, PlayError> {
+pub fn detect_package_manager(
+    cmd_runner: &dyn crate::modules::detection::CommandRunner,
+) -> Result<Box<dyn PackageManager>, PlayError> {
     // apt
-    if Command::new("apt")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
+    if cmd_runner
+        .run_command("apt", &["--version"])
+        .map(|_| true)
         .unwrap_or(false)
     {
         return Ok(Box::new(AptPm));
     }
     // dnf / yum
-    if Command::new("dnf")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
+    if cmd_runner
+        .run_command("dnf", &["--version"])
+        .map(|_| true)
         .unwrap_or(false)
     {
         return Ok(Box::new(DnfPm));
     }
     // pacman
-    if Command::new("pacman")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
+    if cmd_runner
+        .run_command("pacman", &["--version"])
+        .map(|_| true)
         .unwrap_or(false)
     {
         return Ok(Box::new(PacmanPm));
     }
     // zypper (SUSE / openSUSE)
-    if Command::new("zypper")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
+    if cmd_runner
+        .run_command("zypper", &["--version"])
+        .map(|_| true)
         .unwrap_or(false)
     {
         return Ok(Box::new(ZypperPm));
