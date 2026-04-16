@@ -98,4 +98,10 @@ pub enum PlayError {
 
     #[error("Planning failed: {reason}")]
     PlanningFailed { reason: String },
+
+    #[error("CPU governor write failed for core {core}: {reason}")]
+    GovernorWrite { core: String, reason: String },
+
+    #[error("GPU perf mode write failed: {reason}")]
+    GpuPerfWrite { reason: String },
 }

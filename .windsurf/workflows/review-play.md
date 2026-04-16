@@ -1,4 +1,8 @@
-# /review — Code Review Against Project Standards
+---
+auto_execution_mode: 2
+description: review play's code against project standards
+---
+# /review-play — Code Review Against Project Standards
 
 Review the following: $ARGUMENTS
 

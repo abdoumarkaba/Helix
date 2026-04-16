@@ -708,11 +708,17 @@ pub struct DetectionResult {
 }
 
 /// Detect all hardware components and return a complete [`DetectionResult`].
+///
+/// `wayland_display` and `x_display` are the values of `$WAYLAND_DISPLAY` and
+/// `$DISPLAY` respectively, injected for testability. In production, pass
+/// `std::env::var("WAYLAND_DISPLAY").ok().as_deref()` etc.
 pub fn detect_hardware(
     proc_root: &Path,
     sys_root: &Path,
     etc_root: &Path,
     cmd_runner: &dyn CommandRunner,
+    wayland_display: Option<&str>,
+    x_display: Option<&str>,
 ) -> Result<DetectionResult, PlayError> {
     let kernel = detect_kernel(proc_root, sys_root)?;
     let cpu = detect_cpu(proc_root, sys_root)?;
@@ -739,11 +745,7 @@ pub fn detect_hardware(
     gpu.is_laptop_gpu = is_laptop(sys_root);
 
     let audio = detect_audio(cmd_runner);
-    let display = detect_display(
-        cmd_runner,
-        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
-        std::env::var("DISPLAY").ok().as_deref(),
-    );
+    let display = detect_display(cmd_runner, wayland_display, x_display);
     let distro = detect_distro(etc_root)?;
 
     info!(
@@ -828,9 +830,21 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_memory() {
-        let mem = detect_memory(Path::new("/proc"));
-        assert!(mem.total_mb > 0);
+    fn test_detect_memory_from_meminfo() {
+        let dir = tempfile::tempdir().unwrap();
+        let meminfo = dir.path().join("meminfo");
+        fs::write(
+            &meminfo,
+            "MemTotal:       16384000 kB\n\
+             MemAvailable:    8192000 kB\n\
+             SwapTotal:       4096000 kB\n",
+        )
+        .unwrap();
+
+        let mem = detect_memory(dir.path());
+        assert_eq!(mem.total_mb, 16000);
+        assert_eq!(mem.available_mb, 8000);
+        assert_eq!(mem.swap_total_mb, 4000);
     }
 
     #[test]
