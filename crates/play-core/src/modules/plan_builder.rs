@@ -270,7 +270,7 @@ impl<'a> PlanBuilder<'a> {
             .graphics
             .mangohud
             .as_ref()
-            .map_or(false, |m| m.enabled)
+            .is_some_and(|m| m.enabled)
         {
             warnings.push(PlanWarning {
                 message: "MangoHud not configured — performance overlay unavailable.".to_owned(),
@@ -338,10 +338,10 @@ impl<'a> PlanBuilder<'a> {
             hard_blocks,
             required_packages: Vec::new(),
             runner_action: RunnerAction::AlreadyInstalled {
-                path: PathBuf::from("/dev/null"),
+                path: PathBuf::new(),
             },
             prefix_action: PrefixAction::AlreadyExists {
-                path: PathBuf::from("/dev/null"),
+                path: PathBuf::new(),
             },
             tweaks: Vec::new(),
             db_hit,

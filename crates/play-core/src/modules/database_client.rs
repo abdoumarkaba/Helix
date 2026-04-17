@@ -44,8 +44,9 @@ impl DatabaseReader for DatabaseClient {
         if !entry_path.exists() {
             return Ok(None);
         }
-        let raw = std::fs::read_to_string(&entry_path).map_err(|e| PlayError::PlanningFailed {
-            reason: format!("Failed to read DB entry at {}: {e}", entry_path.display()),
+        let raw = std::fs::read_to_string(&entry_path).map_err(|e| PlayError::DbEntryReadFailed {
+            path: entry_path.clone(),
+            reason: e.to_string(),
         })?;
         let entry: DbEntry = toml::from_str(&raw).map_err(|e| PlayError::DatabaseCorrupted {
             hash: exe_hash.to_owned(),
@@ -59,11 +60,13 @@ impl DatabaseReader for DatabaseClient {
         if !path.exists() {
             return Err(PlayError::RunnersManifestMissing { path });
         }
-        let raw = std::fs::read_to_string(&path).map_err(|e| PlayError::PlanningFailed {
-            reason: format!("Failed to read runners.toml: {e}"),
+        let raw = std::fs::read_to_string(&path).map_err(|e| PlayError::RunnersManifestReadFailed {
+            path: path.clone(),
+            reason: e.to_string(),
         })?;
-        toml::from_str(&raw).map_err(|e| PlayError::PlanningFailed {
-            reason: format!("runners.toml parse error: {e}"),
+        toml::from_str(&raw).map_err(|e| PlayError::RunnersManifestParseFailed {
+            path,
+            reason: e.to_string(),
         })
     }
 }
@@ -124,8 +127,9 @@ impl DatabaseReader for FixtureReader {
         if !path.exists() {
             return Ok(None);
         }
-        let raw = std::fs::read_to_string(&path).map_err(|e| PlayError::PlanningFailed {
-            reason: format!("fixture read error: {e}"),
+        let raw = std::fs::read_to_string(&path).map_err(|e| PlayError::DbEntryReadFailed {
+            path: path.clone(),
+            reason: e.to_string(),
         })?;
         toml::from_str(&raw)
             .map_err(|e| PlayError::DatabaseCorrupted {
@@ -140,11 +144,13 @@ impl DatabaseReader for FixtureReader {
         if !path.exists() {
             return Err(PlayError::RunnersManifestMissing { path });
         }
-        let raw = std::fs::read_to_string(&path).map_err(|e| PlayError::PlanningFailed {
-            reason: format!("fixture runners.toml read error: {e}"),
+        let raw = std::fs::read_to_string(&path).map_err(|e| PlayError::RunnersManifestReadFailed {
+            path: path.clone(),
+            reason: e.to_string(),
         })?;
-        toml::from_str(&raw).map_err(|e| PlayError::PlanningFailed {
-            reason: format!("fixture runners.toml parse error: {e}"),
+        toml::from_str(&raw).map_err(|e| PlayError::RunnersManifestParseFailed {
+            path,
+            reason: e.to_string(),
         })
     }
 }

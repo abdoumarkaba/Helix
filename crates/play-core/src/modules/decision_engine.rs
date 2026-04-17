@@ -491,10 +491,14 @@ impl DecisionEngine {
 
         // Check CPU architecture requirement.
         if let Some(required_arch) = constraint.cpu_arch_required {
-            // Infer CPU arch from physical_cores > 0 (all modern x86 CPUs are either X86 or X86_64).
-            // For simplicity, treat any system as X86_64 unless it's explicitly 32-bit.
-            // This is a reasonable heuristic — SplitLockMitigate applies to all x86.
-            let _ = required_arch; // Acknowledged; x86 arch check is always satisfied on x86_64 Linux.
+            if hw.cpu.arch != required_arch {
+                return TweakDecision::NotApplicable {
+                    reason: format!(
+                        "Tweak requires {:?} CPU, but detected {:?}.",
+                        required_arch, hw.cpu.arch
+                    ),
+                };
+            }
         }
 
         // Check kernel version minimum.
@@ -562,7 +566,7 @@ impl DecisionEngine {
                 let mhz = hw
                     .gpu
                     .nvidia_vbios_max_clock_mhz
-                    .map_or(0, |max| Self::compute_nvidia_lock_clock(max));
+                    .map_or(0, Self::compute_nvidia_lock_clock);
                 if mhz == 0 {
                     TweakDecision::NotApplicable {
                         reason:
@@ -625,6 +629,7 @@ mod tests {
             cpu: CpuProfile {
                 vendor: CpuVendor::Intel,
                 model: "Test CPU".to_owned(),
+                arch: CpuArch::X86_64,
                 physical_cores: 6,
                 logical_cores: 12,
                 base_freq_mhz: 2400,
@@ -991,5 +996,234 @@ mod tests {
             matches!(decision, TweakDecision::NotApplicable { .. }),
             "CpuGovernorPerformance should be NotApplicable on laptop CPU"
         );
+    }
+
+    // --- CPU arch constraint enforcement (B2 regression) ---
+
+    #[test]
+    fn cpu_arch_mismatch_returns_not_applicable() {
+        // Build hw with X86_64 arch (default from make_hw)
+        let hw = make_hw(GpuVendor::NVIDIA, false, Some(1777));
+        assert_eq!(hw.cpu.arch, CpuArch::X86_64);
+
+        // Construct a constraint that requires X86 (32-bit) — should be NotApplicable on X86_64
+        let constraint = TweakConstraint {
+            id: TweakId::SplitLockMitigate,
+            class: TweakClass::B,
+            min_ram_mb: None,
+            kernel_version_min: None,
+            gpu_vendor_required: None,
+            gpu_vendor_exclusions: vec![],
+            cpu_arch_required: Some(CpuArch::X86),
+            requires_desktop: false,
+            reversible: true,
+            reboot_required: false,
+            reboot_resets: true,
+            risk_level: RiskLevel::Low,
+            rationale: "test constraint",
+        };
+
+        let decision = DecisionEngine::resolve_tweak(&constraint, &hw, 65536);
+        assert!(
+            matches!(decision, TweakDecision::NotApplicable { .. }),
+            "Constraint requiring X86 should be NotApplicable on X86_64 hardware"
+        );
+    }
+
+    #[test]
+    fn cpu_arch_match_does_not_exclude() {
+        // Build hw with X86 (32-bit) arch
+        let mut hw = make_hw(GpuVendor::NVIDIA, false, Some(1777));
+        hw.cpu.arch = CpuArch::X86;
+
+        // Constraint requiring X86 — arch check should pass
+        let constraint = TweakConstraint {
+            id: TweakId::SplitLockMitigate,
+            class: TweakClass::B,
+            min_ram_mb: None,
+            kernel_version_min: None,
+            gpu_vendor_required: None,
+            gpu_vendor_exclusions: vec![],
+            cpu_arch_required: Some(CpuArch::X86),
+            requires_desktop: false,
+            reversible: true,
+            reboot_required: false,
+            reboot_resets: true,
+            risk_level: RiskLevel::Low,
+            rationale: "test constraint",
+        };
+
+        let decision = DecisionEngine::resolve_tweak(&constraint, &hw, 65536);
+        // Should NOT be NotApplicable due to arch (other constraints may still apply)
+        if let TweakDecision::NotApplicable { reason } = &decision {
+            assert!(
+                !reason.contains("CPU"),
+                "Should not be excluded by arch on matching arch, got: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn cpu_arch_none_constraint_applies_to_any_arch() {
+        // X86_64 hardware with None constraint — should not be excluded by arch
+        let hw = make_hw(GpuVendor::NVIDIA, false, Some(1777));
+
+        let constraint = TweakConstraint {
+            id: TweakId::VmMaxMapCount,
+            class: TweakClass::B,
+            min_ram_mb: None,
+            kernel_version_min: None,
+            gpu_vendor_required: None,
+            gpu_vendor_exclusions: vec![],
+            cpu_arch_required: None,
+            requires_desktop: false,
+            reversible: true,
+            reboot_required: false,
+            reboot_resets: true,
+            risk_level: RiskLevel::Low,
+            rationale: "test constraint",
+        };
+
+        let decision = DecisionEngine::resolve_tweak(&constraint, &hw, 65536);
+        // Should not be NotApplicable due to arch
+        if let TweakDecision::NotApplicable { reason } = &decision {
+            assert!(
+                !reason.contains("CPU"),
+                "None arch constraint should not exclude, got: {reason}"
+            );
+        }
+    }
+
+    // --- Failure-path tests (S3) ---
+
+    fn make_manifest(runner_type: RunnerType, versions: &[&str]) -> RunnersManifest {
+        RunnersManifest {
+            runners: versions
+                .iter()
+                .map(|v| RunnerRelease {
+                    runner_type,
+                    version: Version::parse(v).unwrap(),
+                    url: format!("https://example.com/{v}.tar.gz"),
+                    sha256: format!("sha256-{v}"),
+                })
+                .collect(),
+        }
+    }
+
+    fn make_identity() -> GameIdentity {
+        GameIdentity {
+            exe_hash: "ab".repeat(32),
+            exe_name: "test.exe".to_owned(),
+            steam_app_id: None,
+            detected_name: None,
+            dx_version: DirectXVersion::D3D11,
+            pe_arch: PeArchitecture::X86_64,
+            anti_cheat: vec![],
+            engine_hint: None,
+            has_video_cutscenes: None,
+        }
+    }
+
+    #[test]
+    fn select_runner_no_candidates_returns_no_runner_available() {
+        // Manifest has only ProtonGE runners, but DB override asks for WineGE
+        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25", "8.26"]);
+        let db = DbEntry {
+            runner_type_override: Some(RunnerType::WineGE),
+            ..Default::default()
+        };
+        let identity = make_identity();
+
+        let result = DecisionEngine::select_runner(&[], Some(&db), &manifest, &identity);
+        assert!(
+            matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
+            "expected NoRunnerAvailable when no candidates match type, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn select_runner_version_floor_excludes_all() {
+        // All runners below the floor
+        let manifest = make_manifest(RunnerType::ProtonGE, &["7.0", "7.1"]);
+        let db = DbEntry {
+            runner_version_min: Some(Version::parse("8.0").unwrap()),
+            ..Default::default()
+        };
+        let identity = make_identity();
+
+        let result = DecisionEngine::select_runner(&[], Some(&db), &manifest, &identity);
+        assert!(
+            matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
+            "expected NoRunnerAvailable when all versions below floor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn select_runner_empty_manifest_returns_error() {
+        let manifest = RunnersManifest { runners: vec![] };
+        let identity = make_identity();
+
+        let result = DecisionEngine::select_runner(&[], None, &manifest, &identity);
+        assert!(
+            matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
+            "expected NoRunnerAvailable on empty manifest, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_runner_action_missing_from_manifest_returns_error() {
+        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25"]);
+        let version = Version::parse("9.99").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = DecisionEngine::resolve_runner_action(
+            RunnerType::ProtonGE,
+            &version,
+            &manifest,
+            dir.path(),
+        );
+        assert!(
+            matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
+            "expected NoRunnerAvailable when version missing from manifest, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_runner_action_wrong_type_returns_error() {
+        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25"]);
+        let version = Version::parse("8.25").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = DecisionEngine::resolve_runner_action(
+            RunnerType::WineGE,
+            &version,
+            &manifest,
+            dir.path(),
+        );
+        assert!(
+            matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
+            "expected NoRunnerAvailable when runner type mismatch, got: {result:?}"
+        );
+    }
+
+    // --- Idempotency tests (S4) ---
+
+    #[test]
+    fn resolve_tweak_is_idempotent() {
+        let hw = make_hw(GpuVendor::NVIDIA, false, Some(1777));
+        let registry = super::super::tweak_registry::all();
+
+        for constraint in registry {
+            let d1 = DecisionEngine::resolve_tweak(constraint, &hw, 65536);
+            let d2 = DecisionEngine::resolve_tweak(constraint, &hw, 65536);
+
+            // Compare by debug format since TweakDecision doesn't derive PartialEq
+            assert_eq!(
+                format!("{d1:?}"),
+                format!("{d2:?}"),
+                "resolve_tweak not idempotent for {:?}",
+                constraint.id
+            );
+        }
     }
 }

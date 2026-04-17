@@ -55,6 +55,7 @@ fn base_env(dx: DirectXVersion, pe_arch: PeArchitecture) -> GameEnvironment {
             cpu: CpuProfile {
                 vendor: CpuVendor::Intel,
                 model: "i7-13650HX".to_owned(),
+                arch: CpuArch::X86_64,
                 physical_cores: 6,
                 logical_cores: 12,
                 base_freq_mhz: 2600,

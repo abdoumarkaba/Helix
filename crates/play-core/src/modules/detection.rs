@@ -27,9 +27,9 @@ use sysinfo::System;
 use tracing::{info, warn};
 
 use crate::models::environment::{
-    AudioBackend, AudioConfig, CpuProfile, CpuVendor, DisplayProfile, DisplayServer, Distro,
-    DistroInfo, DriverType, GpuFeatureSet, GpuProfile, GpuVendor, HardwareProfile, KernelProfile,
-    KernelVersion, MemoryProfile, ThpMode, WineAudioDriver,
+    AudioBackend, AudioConfig, CpuArch, CpuProfile, CpuVendor, DisplayProfile, DisplayServer,
+    Distro, DistroInfo, DriverType, GpuFeatureSet, GpuProfile, GpuVendor, HardwareProfile,
+    KernelProfile, KernelVersion, MemoryProfile, ThpMode, WineAudioDriver,
 };
 use crate::models::errors::PlayError;
 
@@ -263,6 +263,7 @@ pub fn detect_cpu(proc_root: &Path, sys_root: &Path) -> Result<CpuProfile, PlayE
 
     let supports_avx2 = flags.iter().any(|f| f == "avx2");
     let supports_avx512 = flags.iter().any(|f| f == "avx512f");
+    let has_long_mode = flags.iter().any(|f| f == "lm");
 
     let cpu_vendor = if vendor_str.contains("AuthenticAMD") {
         CpuVendor::AMD
@@ -270,6 +271,15 @@ pub fn detect_cpu(proc_root: &Path, sys_root: &Path) -> Result<CpuProfile, PlayE
         CpuVendor::Intel
     } else {
         CpuVendor::Unknown
+    };
+
+    // Infer CPU architecture from flags.
+    // "lm" (long mode) indicates 64-bit capable x86 CPU.
+    // All supported distros run on x86_64; 32-bit only if lm is absent.
+    let cpu_arch = if has_long_mode {
+        CpuArch::X86_64
+    } else {
+        CpuArch::X86
     };
 
     info!(
@@ -283,6 +293,7 @@ pub fn detect_cpu(proc_root: &Path, sys_root: &Path) -> Result<CpuProfile, PlayE
     Ok(CpuProfile {
         vendor: cpu_vendor,
         model: model_str,
+        arch: cpu_arch,
         physical_cores,
         logical_cores,
         base_freq_mhz,
@@ -343,7 +354,7 @@ pub fn detect_memory(proc_root: &Path) -> MemoryProfile {
     }
 
     // Fallback to sysinfo
-    let mut sys = System::new_all();
+    let mut sys = System::new();
     sys.refresh_memory();
 
     let total_mb = sys.total_memory() / 1024;

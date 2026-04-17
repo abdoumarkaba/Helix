@@ -4,13 +4,13 @@
 /// DecisionEngine iterates this registry to produce TweakDecisions.
 /// There is no match-on-tweak-name in business logic — the registry
 /// encapsulates all applicability constraints here, as pure data.
-use crate::models::environment::{CpuArch, GpuVendor};
+use crate::models::environment::GpuVendor;
 use crate::models::plan::{RiskLevel, TweakClass, TweakConstraint, TweakId};
 
 /// Returns the complete static tweak registry.
 /// Every known system tweak is represented exactly once.
 pub fn all() -> &'static [TweakConstraint] {
-    &TWEAKS
+    TWEAKS
 }
 
 static TWEAKS: &[TweakConstraint] = &[
@@ -148,7 +148,7 @@ static TWEAKS: &[TweakConstraint] = &[
         kernel_version_min: Some((5, 7)),
         gpu_vendor_required: None,
         gpu_vendor_exclusions: vec![],
-        cpu_arch_required: Some(CpuArch::X86), // Spec §10: "x86 arch only" — unaligned atomics are x86 concern
+        cpu_arch_required: None, // Spec §10: "x86 arch only" — split_lock is an x86-family concern (both X86 and X86_64). All supported distros are x86-family; set to None until ARM support is added.
         requires_desktop: false,
         reversible: true,
         reboot_required: false,

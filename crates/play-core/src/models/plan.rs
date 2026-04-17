@@ -229,6 +229,19 @@ pub struct DbEntry {
     pub notes: Option<String>,
 }
 
+impl Default for DbEntry {
+    fn default() -> Self {
+        Self {
+            runner_version_min: None,
+            runner_type_override: None,
+            dll_overrides: Vec::new(),
+            extra_env_vars: IndexMap::new(),
+            windows_version_override: None,
+            notes: None,
+        }
+    }
+}
+
 /// One entry in the runners.toml manifest (play-db).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerRelease {

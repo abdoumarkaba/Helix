@@ -150,6 +150,7 @@ pub struct GpuFeatureSet {
 pub struct CpuProfile {
     pub vendor: CpuVendor,
     pub model: String,
+    pub arch: CpuArch,
     pub physical_cores: u32,
     pub logical_cores: u32,
     pub base_freq_mhz: u32,

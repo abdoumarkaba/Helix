@@ -96,8 +96,14 @@ pub enum PlayError {
         version_min: String,
     },
 
-    #[error("Planning failed: {reason}")]
-    PlanningFailed { reason: String },
+    #[error("Failed to read DB entry at {path}: {reason}")]
+    DbEntryReadFailed { path: PathBuf, reason: String },
+
+    #[error("Failed to read runners.toml at {path}: {reason}")]
+    RunnersManifestReadFailed { path: PathBuf, reason: String },
+
+    #[error("runners.toml parse error at {path}: {reason}")]
+    RunnersManifestParseFailed { path: PathBuf, reason: String },
 
     #[error("CPU governor write failed for core {core}: {reason}")]
     GovernorWrite { core: String, reason: String },

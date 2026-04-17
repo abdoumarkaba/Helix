@@ -33,6 +33,9 @@ pub enum GpuPerfGuard {
         prev_persistence: String,
         /// Clock lock value in MHz that was applied, or None if laptop (no lock).
         clock_lock_mhz: Option<u32>,
+        /// Injected command runner — used by Drop to restore state.
+        /// Stored as Box<dyn> so the guard owns the runner and Drop can call it.
+        cmd_runner: Box<dyn CommandRunner>,
     },
     Noop,
 }
@@ -91,7 +94,7 @@ impl GpuPerfGuard {
                 } else {
                     let lock = gpu
                         .nvidia_vbios_max_clock_mhz
-                        .map(|max| crate::modules::decision_engine::DecisionEngine::compute_nvidia_lock_clock(max));
+                        .map(crate::modules::decision_engine::DecisionEngine::compute_nvidia_lock_clock);
 
                     if let Some(mhz) = lock {
                         if mhz == 0 {
@@ -132,6 +135,7 @@ impl GpuPerfGuard {
                 Ok(Self::Nvidia {
                     prev_persistence,
                     clock_lock_mhz,
+                    cmd_runner: Box::from(crate::modules::detection::RealCommandRunner),
                 })
             }
             GpuVendor::AMD => {
@@ -157,17 +161,12 @@ impl Drop for GpuPerfGuard {
         if let Self::Nvidia {
             prev_persistence,
             clock_lock_mhz,
+            cmd_runner,
         } = self
         {
-            // We can't hold a reference to CommandRunner here, so we use
-            // RealCommandRunner directly. This is acceptable because Drop
-            // always runs in the real process context, never in tests
-            // (tests use catch_unwind which drops after the test scope).
-            let runner = crate::modules::detection::RealCommandRunner;
-
             // Reset clocks first (if they were locked)
             if clock_lock_mhz.is_some() {
-                if let Err(e) = runner.run_command("nvidia-smi", &["-rgc"]) {
+                if let Err(e) = cmd_runner.run_command("nvidia-smi", &["-rgc"]) {
                     // NEVER panic in Drop — log the error and continue
                     tracing::error!(
                         event = "restore_failed",
@@ -188,7 +187,7 @@ impl Drop for GpuPerfGuard {
             } else {
                 "0"
             };
-            if let Err(e) = runner.run_command("nvidia-smi", &["-pm", pm_val]) {
+            if let Err(e) = cmd_runner.run_command("nvidia-smi", &["-pm", pm_val]) {
                 tracing::error!(
                     event = "restore_failed",
                     tweak = "gpu_perf.persistence_mode",
@@ -343,6 +342,7 @@ mod tests {
         if let GpuPerfGuard::Nvidia {
             prev_persistence,
             clock_lock_mhz,
+            cmd_runner: _,
         } = &guard
         {
             assert_eq!(prev_persistence, "Disabled");
@@ -383,6 +383,7 @@ mod tests {
         if let GpuPerfGuard::Nvidia {
             prev_persistence,
             clock_lock_mhz,
+            cmd_runner: _,
         } = &guard
         {
             assert_eq!(prev_persistence, "Disabled");
@@ -426,13 +427,12 @@ mod tests {
         let gpu = nvidia_desktop_gpu();
         let runner = MockCommandRunner::new(nvidia_responses());
 
-        // We can't easily test Drop with RealCommandRunner, so we test
-        // that the guard holds the right data for Drop to use.
         let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, &runner).unwrap();
 
         if let GpuPerfGuard::Nvidia {
             prev_persistence,
             clock_lock_mhz,
+            cmd_runner: _,
         } = &guard
         {
             assert_eq!(prev_persistence, "Disabled");
@@ -441,8 +441,17 @@ mod tests {
             panic!("expected Nvidia variant");
         }
 
-        // Drop will run RealCommandRunner — we just verify it doesn't panic
+        // Drop now uses the stored mock runner — verify restore commands
+        let calls_before_drop = runner.calls().len();
         drop(guard);
+        let calls = runner.calls();
+
+        // After drop: -rgc (reset clocks) + -pm 0 (restore persistence)
+        assert_eq!(calls.len(), calls_before_drop + 2);
+        assert_eq!(calls[calls_before_drop].0, "nvidia-smi");
+        assert_eq!(calls[calls_before_drop].1[0], "-rgc");
+        assert_eq!(calls[calls_before_drop + 1].1[0], "-pm");
+        assert_eq!(calls[calls_before_drop + 1].1[1], "0");
     }
 
     #[test]
