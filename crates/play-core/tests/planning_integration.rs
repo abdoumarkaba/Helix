@@ -63,17 +63,9 @@ fn base_env(dx: DirectXVersion, pe_arch: PeArchitecture) -> GameEnvironment {
                 supports_avx512: false,
                 is_laptop_cpu: true,
             },
-            memory: MemoryProfile {
-                total_mb: 15657,
-                available_mb: 10000,
-                swap_total_mb: 8192,
-            },
+            memory: MemoryProfile { total_mb: 15657, available_mb: 10000, swap_total_mb: 8192 },
             kernel: KernelProfile {
-                version: KernelVersion {
-                    major: 6,
-                    minor: 18,
-                    patch: 13,
-                },
+                version: KernelVersion { major: 6, minor: 18, patch: 13 },
                 has_futex2: true,
                 has_fsync: true,
                 vm_max_map_count: 65536,
@@ -169,25 +161,12 @@ fn full_plan_d3d9_pipewire_nvidia_laptop() {
     let db = FixtureReader::new(fixture_db());
     let plan = module.plan_with_reader(&env, &db).unwrap();
 
-    assert!(
-        plan.hard_blocks.is_empty(),
-        "unexpected hard blocks: {:?}",
-        plan.hard_blocks
-    );
+    assert!(plan.hard_blocks.is_empty(), "unexpected hard blocks: {:?}", plan.hard_blocks);
     assert_eq!(plan.env.graphics.translation_layer, TranslationLayer::Dxvk);
     assert_eq!(plan.env.runner.runner_type, RunnerType::ProtonGE);
-    assert!(
-        plan.env.system.fsync,
-        "fsync should be set on futex2 kernel"
-    );
-    assert!(
-        !plan.env.system.esync,
-        "esync should not be set when fsync is active"
-    );
-    assert!(
-        !plan.env.metadata.decisions.is_empty(),
-        "decisions must be recorded"
-    );
+    assert!(plan.env.system.fsync, "fsync should be set on futex2 kernel");
+    assert!(!plan.env.system.esync, "esync should not be set when fsync is active");
+    assert!(!plan.env.metadata.decisions.is_empty(), "decisions must be recorded");
 }
 
 #[test]
@@ -197,28 +176,20 @@ fn full_plan_d3d12_selects_vkd3d() {
     let db = NoopDatabaseReader::with_manifest(load_fixture_manifest());
     let plan = module.plan_with_reader(&env, &db).unwrap();
 
-    assert_eq!(
-        plan.env.graphics.translation_layer,
-        TranslationLayer::Vkd3dProton
-    );
+    assert_eq!(plan.env.graphics.translation_layer, TranslationLayer::Vkd3dProton);
     assert!(!plan.db_hit);
 }
 
 #[test]
 fn eac_hard_block_short_circuits() {
     let mut env = base_env(DirectXVersion::D3D9, PeArchitecture::X86_64);
-    env.identity.anti_cheat = vec![AntiCheat::EasyAntiCheat {
-        linux_supported: false,
-    }];
+    env.identity.anti_cheat = vec![AntiCheat::EasyAntiCheat { linux_supported: false }];
 
     let module = planning_module();
     let db = NoopDatabaseReader::with_manifest(load_fixture_manifest());
     let plan = module.plan_with_reader(&env, &db).unwrap();
 
-    assert!(
-        !plan.hard_blocks.is_empty(),
-        "EAC hard block must be recorded"
-    );
+    assert!(!plan.hard_blocks.is_empty(), "EAC hard block must be recorded");
     assert!(plan.hard_blocks[0].contains("EasyAntiCheat"));
 }
 
@@ -232,10 +203,7 @@ fn plan_is_deterministic() {
     let plan2 = module.plan_with_reader(&env, &db).unwrap();
 
     // Compare key fields — GamePlan doesn't derive PartialEq (contains PathBuf etc.)
-    assert_eq!(
-        plan1.env.graphics.translation_layer,
-        plan2.env.graphics.translation_layer
-    );
+    assert_eq!(plan1.env.graphics.translation_layer, plan2.env.graphics.translation_layer);
     assert_eq!(plan1.env.runner.runner_type, plan2.env.runner.runner_type);
     assert_eq!(plan1.env.runner.version, plan2.env.runner.version);
     assert_eq!(plan1.env.system.fsync, plan2.env.system.fsync);
@@ -275,11 +243,7 @@ fn db_entry_dll_overrides_merged() {
 
     assert!(plan.db_hit, "DB hit expected for fixture hash");
     assert!(
-        plan.env
-            .prefix
-            .dll_overrides
-            .iter()
-            .any(|o| o.dll == "d3d9"),
+        plan.env.prefix.dll_overrides.iter().any(|o| o.dll == "d3d9"),
         "fixture DLL override (d3d9) should be in plan"
     );
 }

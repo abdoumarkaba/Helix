@@ -169,12 +169,8 @@ pub struct TweakConstraint {
 pub enum RunnerAction {
     /// Runner binary already present and verified.
     AlreadyInstalled { path: PathBuf },
-    /// Will be downloaded and SHA256-verified during execution.
-    Download {
-        url: String,
-        version: Version,
-        sha256: String,
-    },
+    /// Will be downloaded and SHA512-verified during execution.
+    Download { url: String, version: Version, sha512: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,11 +178,7 @@ pub enum PrefixAction {
     /// Prefix already exists at this path.
     AlreadyExists { path: PathBuf },
     /// Will be created via wineboot during execution.
-    Create {
-        path: PathBuf,
-        arch: WineArch,
-        windows_version: WindowsVersion,
-    },
+    Create { path: PathBuf, arch: WineArch, windows_version: WindowsVersion },
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +240,7 @@ pub struct RunnerRelease {
     pub runner_type: RunnerType,
     pub version: Version,
     pub url: String,
-    pub sha256: String,
+    pub sha512: String,
 }
 
 /// Deserialized runners.toml from local play-db cache.

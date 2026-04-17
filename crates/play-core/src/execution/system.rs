@@ -19,9 +19,9 @@ use std::path::PathBuf;
 
 use crate::guards::governor::GovernorGuard;
 use crate::guards::gpu_perf::GpuPerfGuard;
+use crate::models::environment::HardwareProfile;
 use crate::models::errors::PlayError;
 use crate::models::plan::{PlannedTweak, SystemTweak, TweakDecision};
-use crate::models::environment::HardwareProfile;
 use crate::modules::detection::CommandRunner;
 
 // ---------------------------------------------------------------------------
@@ -40,10 +40,7 @@ pub struct ActiveGuards {
 impl ActiveGuards {
     /// No-op guards (nothing applied).
     pub fn empty() -> Self {
-        Self {
-            governor: None,
-            gpu_perf: None,
-        }
+        Self { governor: None, gpu_perf: None }
     }
 
     /// Returns true if any guard is actually active.
@@ -87,12 +84,9 @@ impl SystemModule {
 
         for tweak in plan_tweaks {
             if let TweakDecision::Apply(ref sys_tweak) = tweak.decision {
-                if let Err(e) = self.apply_one(
-                    sys_tweak,
-                    hw,
-                    &mut governor_guard,
-                    &mut gpu_perf_guard,
-                ) {
+                if let Err(e) =
+                    self.apply_one(sys_tweak, hw, &mut governor_guard, &mut gpu_perf_guard)
+                {
                     // Partial guards drop here, restoring what was applied.
                     drop(governor_guard);
                     drop(gpu_perf_guard);
@@ -101,10 +95,7 @@ impl SystemModule {
             }
         }
 
-        Ok(ActiveGuards {
-            governor: governor_guard,
-            gpu_perf: gpu_perf_guard,
-        })
+        Ok(ActiveGuards { governor: governor_guard, gpu_perf: gpu_perf_guard })
     }
 
     /// Dispatch a single tweak. No match on tweak name in business logic —
@@ -126,7 +117,7 @@ impl SystemModule {
                 )?;
                 *governor_guard = Some(guard);
                 Ok(())
-            }
+            },
 
             SystemTweak::NvidiaPersistenceMode | SystemTweak::NvidiaClockLock { .. } => {
                 // GpuPerfGuard handles both persistence mode and clock lock.
@@ -140,36 +131,36 @@ impl SystemModule {
                     *gpu_perf_guard = Some(guard);
                 }
                 Ok(())
-            }
+            },
 
             // --- Class A: env-var-only tweaks (no guard needed, set by LaunchModule) ---
-            SystemTweak::Fsync | SystemTweak::Esync | SystemTweak::GameMode | SystemTweak::DxvkAsync { .. } => {
+            SystemTweak::Fsync
+            | SystemTweak::Esync
+            | SystemTweak::GameMode
+            | SystemTweak::DxvkAsync { .. } => {
                 // These are handled by environment variables in LaunchModule.
                 // SystemModule doesn't need to do anything for them.
                 Ok(())
-            }
+            },
 
             // --- Class B: persistent sysctl writes via play-helper ---
             SystemTweak::VmMaxMapCount { target } => {
                 self.write_sysctl("vm.max_map_count", &target.to_string())
-            }
+            },
 
             SystemTweak::ThpMadvise => {
-                self.write_sysfs_file(
-                    "/sys/kernel/mm/transparent_hugepage/enabled",
-                    "madvise",
-                )
-            }
+                self.write_sysfs_file("/sys/kernel/mm/transparent_hugepage/enabled", "madvise")
+            },
 
             SystemTweak::SchedAutogroup { enabled } => {
                 let val = if *enabled { "1" } else { "0" };
                 self.write_sysctl("kernel.sched_autogroup", val)
-            }
+            },
 
             SystemTweak::SplitLockMitigate { enabled } => {
                 let val = if *enabled { "0" } else { "1" };
                 self.write_sysctl("kernel.split_lock_mitigate", val)
-            }
+            },
 
             SystemTweak::UlimitNofile { value } => {
                 let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
@@ -183,29 +174,29 @@ impl SystemModule {
                         reason: format!("failed to write limits.d via play-helper: {e}"),
                     })?;
                 Ok(())
-            }
+            },
         }
     }
 
     /// Write a sysctl value via play-helper.
     fn write_sysctl(&self, key: &str, value: &str) -> Result<(), PlayError> {
-        self.cmd_runner
-            .run_command("play-helper", &["sysctl-write", key, value])
-            .map_err(|e| PlayError::SysctlWrite {
+        self.cmd_runner.run_command("play-helper", &["sysctl-write", key, value]).map_err(|e| {
+            PlayError::SysctlWrite {
                 key: key.to_owned(),
                 reason: format!("failed via play-helper: {e}"),
-            })?;
+            }
+        })?;
         Ok(())
     }
 
     /// Write a sysfs file via play-helper.
     fn write_sysfs_file(&self, path: &str, value: &str) -> Result<(), PlayError> {
-        self.cmd_runner
-            .run_command("play-helper", &["sysfs-write", path, value])
-            .map_err(|e| PlayError::SysctlWrite {
+        self.cmd_runner.run_command("play-helper", &["sysfs-write", path, value]).map_err(|e| {
+            PlayError::SysctlWrite {
                 key: path.to_owned(),
                 reason: format!("failed via play-helper: {e}"),
-            })?;
+            }
+        })?;
         Ok(())
     }
 }
@@ -221,9 +212,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::models::environment::{
-        CpuArch, CpuVendor, Distro, DistroInfo, DisplayProfile, DisplayServer, DriverType,
-        GpuFeatureSet, GpuProfile, GpuVendor, KernelProfile, KernelVersion, MemoryProfile,
-        ThpMode,
+        CpuArch, CpuVendor, DisplayProfile, DisplayServer, Distro, DistroInfo, DriverType,
+        GpuFeatureSet, GpuProfile, GpuVendor, KernelProfile, KernelVersion, MemoryProfile, ThpMode,
     };
     use crate::models::plan::{TweakClass, TweakId};
     use semver::Version;
@@ -232,16 +222,16 @@ mod tests {
     // Mock CommandRunner
     // -----------------------------------------------------------------------
 
+    type CallLog = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+
     #[derive(Clone)]
     struct MockCommandRunner {
         responses: Arc<HashMap<String, Result<String, String>>>,
-        calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+        calls: CallLog,
     }
 
     impl MockCommandRunner {
-        fn new(
-            responses: impl IntoIterator<Item = (String, Result<String, String>)>,
-        ) -> Self {
+        fn new(responses: impl IntoIterator<Item = (String, Result<String, String>)>) -> Self {
             Self {
                 responses: Arc::new(responses.into_iter().collect()),
                 calls: Arc::new(Mutex::new(Vec::new())),
@@ -266,10 +256,7 @@ mod tests {
                 program.to_owned()
             };
 
-            self.responses
-                .get(&key)
-                .cloned()
-                .unwrap_or_else(|| Ok(String::new()))
+            self.responses.get(&key).cloned().unwrap_or_else(|| Ok(String::new()))
         }
 
         fn clone_boxed(&self) -> Box<dyn CommandRunner> {
@@ -311,11 +298,7 @@ mod tests {
             supports_avx512: false,
             is_laptop_cpu: false,
         };
-        let memory = MemoryProfile {
-            total_mb: 16384,
-            available_mb: 8192,
-            swap_total_mb: 8192,
-        };
+        let memory = MemoryProfile { total_mb: 16384, available_mb: 8192, swap_total_mb: 8192 };
         let kernel = KernelProfile {
             version: KernelVersion { major: 6, minor: 5, patch: 0 },
             has_futex2: true,
@@ -447,9 +430,7 @@ mod tests {
             PlannedTweak {
                 id: TweakId::VmMaxMapCount,
                 class: TweakClass::B,
-                decision: TweakDecision::NotApplicable {
-                    reason: "already satisfied".to_owned(),
-                },
+                decision: TweakDecision::NotApplicable { reason: "already satisfied".to_owned() },
                 rationale: "test".to_owned(),
             },
             PlannedTweak {

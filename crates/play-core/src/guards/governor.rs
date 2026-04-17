@@ -52,9 +52,7 @@ impl GovernorGuard {
             return Ok(Self { cores: vec![], cmd_runner });
         }
 
-        let pattern = sys_root
-            .join("sys/devices/system/cpu")
-            .join("cpu*/cpufreq/scaling_governor");
+        let pattern = sys_root.join("sys/devices/system/cpu").join("cpu*/cpufreq/scaling_governor");
 
         let entries: Vec<PathBuf> = glob::glob(pattern.to_string_lossy().as_ref())
             .map_err(|e| PlayError::GovernorWrite {
@@ -93,10 +91,8 @@ impl GovernorGuard {
                     // Manual rollback of already-written cores (can't clone Box<dyn CommandRunner>)
                     for (prev_path, prev_val) in cores.iter().rev() {
                         let prev_path_str = prev_path.to_string_lossy();
-                        let _ = cmd_runner.run_command(
-                            "play-helper",
-                            &["sysfs-write", &prev_path_str, prev_val],
-                        );
+                        let _ = cmd_runner
+                            .run_command("play-helper", &["sysfs-write", &prev_path_str, prev_val]);
                     }
                     PlayError::GovernorWrite {
                         core: path.display().to_string(),
@@ -165,8 +161,10 @@ mod tests {
     // Need fs accessible for MockCommandRunner sysfs-read/sysfs-write
 
     // -----------------------------------------------------------------------
-    // Mock CommandRunner — simulates play-helper sysfs-read/sysfs-write
+    // Mock CommandRunner
     // -----------------------------------------------------------------------
+
+    type CallLog = Arc<Mutex<Vec<(String, Vec<String>)>>>;
 
     /// Mock that simulates `play-helper sysfs-read <path>` and
     /// `play-helper sysfs-write <path> <value>` by reading/writing real
@@ -177,14 +175,12 @@ mod tests {
     /// the guard and inspected after the guard is dropped.
     #[derive(Clone)]
     struct MockCommandRunner {
-        calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+        calls: CallLog,
     }
 
     impl MockCommandRunner {
         fn new() -> Self {
-            Self {
-                calls: Arc::new(Mutex::new(Vec::new())),
-            }
+            Self { calls: Arc::new(Mutex::new(Vec::new())) }
         }
 
         fn calls(&self) -> Vec<(String, Vec<String>)> {
@@ -207,14 +203,14 @@ mod tests {
                 Some("sysfs-read") => {
                     let path = args.get(1).ok_or("sysfs-read missing path arg")?;
                     fs::read_to_string(path).map_err(|e| format!("read failed: {e}"))
-                }
+                },
                 Some("sysfs-write") => {
                     let path = args.get(1).ok_or("sysfs-write missing path arg")?;
                     let value = args.get(2).ok_or("sysfs-write missing value arg")?;
                     fs::write(path, format!("{value}\n"))
                         .map_err(|e| format!("write failed: {e}"))?;
                     Ok(String::new())
-                }
+                },
                 _ => Err(format!("unexpected play-helper subcommand: {:?}", args)),
             }
         }
@@ -247,15 +243,13 @@ mod tests {
         setup_mock_sysfs(dir.path(), 4, "schedutil");
         let runner = MockCommandRunner::new();
 
-        let guard =
-            GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
+        let guard = GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
         assert!(guard.is_active());
 
         // Verify all cores now say "performance"
         for i in 0..4 {
-            let path = dir.path().join(format!(
-                "sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"
-            ));
+            let path =
+                dir.path().join(format!("sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"));
             assert_eq!(fs::read_to_string(&path).unwrap().trim(), "performance");
         }
 
@@ -264,9 +258,8 @@ mod tests {
 
         // Verify cores restored to "schedutil"
         for i in 0..4 {
-            let path = dir.path().join(format!(
-                "sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"
-            ));
+            let path =
+                dir.path().join(format!("sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"));
             assert_eq!(fs::read_to_string(&path).unwrap().trim(), "schedutil");
         }
     }
@@ -277,15 +270,13 @@ mod tests {
         setup_mock_sysfs(dir.path(), 4, "schedutil");
         let runner = MockCommandRunner::new();
 
-        let guard =
-            GovernorGuard::set_performance(dir.path(), true, Box::new(runner)).unwrap();
+        let guard = GovernorGuard::set_performance(dir.path(), true, Box::new(runner)).unwrap();
         assert!(!guard.is_active());
 
         // Cores should remain unchanged
         for i in 0..4 {
-            let path = dir.path().join(format!(
-                "sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"
-            ));
+            let path =
+                dir.path().join(format!("sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"));
             assert_eq!(fs::read_to_string(&path).unwrap().trim(), "schedutil");
         }
     }
@@ -296,8 +287,7 @@ mod tests {
         setup_mock_sysfs(dir.path(), 2, "powersave");
         let runner = MockCommandRunner::new();
 
-        let guard =
-            GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
+        let guard = GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
 
         // Verify guard captured the right previous values
         assert!(guard.is_active());
@@ -313,9 +303,8 @@ mod tests {
 
         // Guard should have restored despite panic
         for i in 0..2 {
-            let path = dir.path().join(format!(
-                "sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"
-            ));
+            let path =
+                dir.path().join(format!("sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"));
             assert_eq!(fs::read_to_string(&path).unwrap().trim(), "powersave");
         }
     }
@@ -326,8 +315,7 @@ mod tests {
         setup_mock_sysfs(dir.path(), 1, "ondemand");
         let runner = MockCommandRunner::new();
 
-        let guard =
-            GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
+        let guard = GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
 
         // Remove the file between set and drop — restore will fail but must not panic
         let path = dir.path().join("sys/devices/system/cpu/cpu0/cpufreq/scaling_governor");
@@ -344,8 +332,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("sys/devices/system/cpu/cpu0")).unwrap();
         let runner = MockCommandRunner::new();
 
-        let guard =
-            GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
+        let guard = GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
         assert!(!guard.is_active());
     }
 

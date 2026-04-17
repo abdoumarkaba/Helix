@@ -53,10 +53,7 @@ pub struct RealCommandRunner;
 
 impl CommandRunner for RealCommandRunner {
     fn run_command(&self, program: &str, args: &[&str]) -> Result<String, String> {
-        let output = Command::new(program)
-            .args(args)
-            .output()
-            .map_err(|e| e.to_string())?;
+        let output = Command::new(program).args(args).output().map_err(|e| e.to_string())?;
 
         if !output.status.success() {
             return Err(String::from_utf8_lossy(&output.stderr).to_string());
@@ -76,33 +73,24 @@ impl CommandRunner for RealCommandRunner {
 /// Parse a kernel version string like "5.15.0-48-generic" into components.
 pub fn parse_kernel_version(s: &str) -> Option<KernelVersion> {
     let s = s.split_whitespace().next()?;
-    let version_part = if let Some(stripped) = s.strip_prefix("Linux version ") {
-        stripped
-    } else {
-        s
-    };
+    let version_part =
+        if let Some(stripped) = s.strip_prefix("Linux version ") { stripped } else { s };
     // Strip trailing suffix like "-arch" or "-gentoo"
     let version_str = version_part.split('-').next()?;
     let mut components = version_str.split('.');
     let major = components.next()?.parse().ok()?;
     let minor = components.next().unwrap_or("0").parse().ok()?;
     let patch = components.next().unwrap_or("0").parse().ok()?;
-    Some(KernelVersion {
-        major,
-        minor,
-        patch,
-    })
+    Some(KernelVersion { major, minor, patch })
 }
 
 /// Read /proc/version and parse it into a [`KernelVersion`].
 pub fn read_kernel_version(proc_root: &Path) -> Result<KernelVersion, PlayError> {
     let path = proc_root.join("version");
-    let contents = fs::read_to_string(&path).map_err(|_| PlayError::HardwareDetection {
-        component: "kernel.version".into(),
-    })?;
-    parse_kernel_version(&contents).ok_or_else(|| PlayError::HardwareDetection {
-        component: "kernel.version".into(),
-    })
+    let contents = fs::read_to_string(&path)
+        .map_err(|_| PlayError::HardwareDetection { component: "kernel.version".into() })?;
+    parse_kernel_version(&contents)
+        .ok_or_else(|| PlayError::HardwareDetection { component: "kernel.version".into() })
 }
 
 /// Check whether futex2 is supported (kernel >= 5.16).
@@ -119,15 +107,12 @@ pub fn kernel_has_futex2(kernel: &KernelVersion) -> bool {
 /// Read the current vm.max_map_count value.
 pub fn read_vm_max_map_count(proc_root: &Path) -> Result<u64, PlayError> {
     let path = proc_root.join("sys/vm/max_map_count");
-    let contents = fs::read_to_string(&path).map_err(|_| PlayError::HardwareDetection {
-        component: "vm.max_map_count".into(),
-    })?;
+    let contents = fs::read_to_string(&path)
+        .map_err(|_| PlayError::HardwareDetection { component: "vm.max_map_count".into() })?;
     contents
         .trim()
         .parse()
-        .map_err(|_| PlayError::HardwareDetection {
-            component: "vm.max_map_count".into(),
-        })
+        .map_err(|_| PlayError::HardwareDetection { component: "vm.max_map_count".into() })
 }
 
 /// Read THP mode from sysfs. Returns [`ThpMode::Never`] on read failure.
@@ -208,9 +193,8 @@ fn is_laptop(sys_root: &Path) -> bool {
 /// Read CPU info from /proc/cpuinfo and build a [`CpuProfile`].
 pub fn detect_cpu(proc_root: &Path, sys_root: &Path) -> Result<CpuProfile, PlayError> {
     let path = proc_root.join("cpuinfo");
-    let contents = fs::read_to_string(&path).map_err(|_| PlayError::HardwareDetection {
-        component: "cpuinfo".into(),
-    })?;
+    let contents = fs::read_to_string(&path)
+        .map_err(|_| PlayError::HardwareDetection { component: "cpuinfo".into() })?;
 
     // Group lines into per-processor blocks
     let mut processors: HashMap<u32, HashMap<String, String>> = HashMap::new();
@@ -229,24 +213,16 @@ pub fn detect_cpu(proc_root: &Path, sys_root: &Path) -> Result<CpuProfile, PlayE
                     current_proc = n;
                 }
             }
-            processors
-                .entry(current_proc)
-                .or_default()
-                .insert(key.to_string(), value.to_string());
+            processors.entry(current_proc).or_default().insert(key.to_string(), value.to_string());
         }
     }
 
     let cpu0 = processors
         .get(&0)
-        .ok_or_else(|| PlayError::HardwareDetection {
-            component: "cpuinfo processor 0".into(),
-        })?;
+        .ok_or_else(|| PlayError::HardwareDetection { component: "cpuinfo processor 0".into() })?;
 
     let vendor_str = cpu0.get("vendor_id").cloned().unwrap_or_default();
-    let model_str = cpu0
-        .get("model name")
-        .cloned()
-        .unwrap_or_else(|| "Unknown CPU".to_string());
+    let model_str = cpu0.get("model name").cloned().unwrap_or_else(|| "Unknown CPU".to_string());
     let flags: Vec<String> = cpu0
         .get("flags")
         .map(|f| f.split_whitespace().map(|s| s.to_string()).collect())
@@ -264,11 +240,8 @@ pub fn detect_cpu(proc_root: &Path, sys_root: &Path) -> Result<CpuProfile, PlayE
     let physical_cores = core_ids.len() as u32;
 
     // Base frequency from cpu MHz field (may be 0 on some kernels)
-    let base_freq_mhz = cpu0
-        .get("cpu MHz")
-        .and_then(|m| m.parse::<f32>().ok())
-        .map(|f| f as u32)
-        .unwrap_or(0);
+    let base_freq_mhz =
+        cpu0.get("cpu MHz").and_then(|m| m.parse::<f32>().ok()).map(|f| f as u32).unwrap_or(0);
 
     let supports_avx2 = flags.iter().any(|f| f == "avx2");
     let supports_avx512 = flags.iter().any(|f| f == "avx512f");
@@ -285,11 +258,7 @@ pub fn detect_cpu(proc_root: &Path, sys_root: &Path) -> Result<CpuProfile, PlayE
     // Infer CPU architecture from flags.
     // "lm" (long mode) indicates 64-bit capable x86 CPU.
     // All supported distros run on x86_64; 32-bit only if lm is absent.
-    let cpu_arch = if has_long_mode {
-        CpuArch::X86_64
-    } else {
-        CpuArch::X86
-    };
+    let cpu_arch = if has_long_mode { CpuArch::X86_64 } else { CpuArch::X86 };
 
     info!(
         vendor = ?cpu_vendor,
@@ -327,20 +296,11 @@ pub fn detect_memory(proc_root: &Path) -> MemoryProfile {
 
         for line in contents.lines() {
             if line.starts_with("MemTotal:") {
-                total_kb = line
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|v| v.parse().ok());
+                total_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok());
             } else if line.starts_with("MemAvailable:") {
-                available_kb = line
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|v| v.parse().ok());
+                available_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok());
             } else if line.starts_with("SwapTotal:") {
-                swap_total_kb = line
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|v| v.parse().ok());
+                swap_total_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok());
             }
         }
 
@@ -349,16 +309,9 @@ pub fn detect_memory(proc_root: &Path) -> MemoryProfile {
             let available_mb = avail / 1024;
             let swap_total_mb = swap / 1024;
 
-            info!(
-                total_mb,
-                available_mb, swap_total_mb, "memory detection complete (meminfo)"
-            );
+            info!(total_mb, available_mb, swap_total_mb, "memory detection complete (meminfo)");
 
-            return MemoryProfile {
-                total_mb,
-                available_mb,
-                swap_total_mb,
-            };
+            return MemoryProfile { total_mb, available_mb, swap_total_mb };
         }
     }
 
@@ -370,16 +323,9 @@ pub fn detect_memory(proc_root: &Path) -> MemoryProfile {
     let available_mb = sys.available_memory() / 1024;
     let swap_total_mb = sys.total_swap() / 1024;
 
-    info!(
-        total_mb,
-        available_mb, swap_total_mb, "memory detection complete (sysinfo fallback)"
-    );
+    info!(total_mb, available_mb, swap_total_mb, "memory detection complete (sysinfo fallback)");
 
-    MemoryProfile {
-        total_mb,
-        available_mb,
-        swap_total_mb,
-    }
+    MemoryProfile { total_mb, available_mb, swap_total_mb }
 }
 
 // ---------------------------------------------------------------------------
@@ -388,12 +334,9 @@ pub fn detect_memory(proc_root: &Path) -> MemoryProfile {
 
 /// Detect GPU from lspci (basic vendor + model).
 pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Result<GpuProfile, PlayError> {
-    let output =
-        cmd_runner
-            .run_command("lspci", &["-mm"])
-            .map_err(|_| PlayError::HardwareDetection {
-                component: "lspci".into(),
-            })?;
+    let output = cmd_runner
+        .run_command("lspci", &["-mm"])
+        .map_err(|_| PlayError::HardwareDetection { component: "lspci".into() })?;
 
     let mut gpu_vendor = GpuVendor::Unknown;
     let mut gpu_model = String::from("Unknown GPU");
@@ -454,16 +397,13 @@ pub fn enrich_nvidia_gpu(
 ) -> Result<(), String> {
     let query_output = match cmd_runner.run_command(
         "nvidia-smi",
-        &[
-            "--query-gpu=clocks.max.gr,memory.total,driver_version",
-            "--format=csv,noheader",
-        ],
+        &["--query-gpu=clocks.max.gr,memory.total,driver_version", "--format=csv,noheader"],
     ) {
         Ok(output) => output,
         Err(e) => {
             warn!("nvidia-smi query failed, using safe defaults: {e}");
             return Ok(());
-        }
+        },
     };
 
     let parts: Vec<&str> = query_output.trim().split(',').collect();
@@ -507,10 +447,7 @@ pub fn enrich_intel_gpu(_gpu: &mut GpuProfile) {
 /// Queries the actual server sample rate instead of hardcoding 48000.
 pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
     // Check for PipeWire
-    if cmd_runner
-        .run_command("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"])
-        .is_ok()
-    {
+    if cmd_runner.run_command("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"]).is_ok() {
         let rate = parse_pipewire_rate(cmd_runner).unwrap_or(48000);
         info!("audio backend: PipeWire detected, rate={rate}");
         return AudioConfig {
@@ -522,10 +459,7 @@ pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
     }
 
     // Check for PulseAudio
-    if cmd_runner
-        .run_command("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])
-        .is_ok()
-    {
+    if cmd_runner.run_command("pactl", &["get-sink-volume", "@DEFAULT_SINK@"]).is_ok() {
         let rate = parse_pulse_rate(cmd_runner).unwrap_or(48000);
         info!("audio backend: PulseAudio detected, rate={rate}");
         return AudioConfig {
@@ -554,9 +488,7 @@ fn parse_pipewire_rate(cmd_runner: &dyn CommandRunner) -> Option<u32> {
         if let Some(rate) = line.split('"').nth(1).and_then(|_| {
             // Find "rate": <number> pattern
             if line.contains("\"rate\"") {
-                line.split(':')
-                    .nth(1)
-                    .and_then(|v| v.trim().trim_end_matches(',').parse().ok())
+                line.split(':').nth(1).and_then(|v| v.trim().trim_end_matches(',').parse().ok())
             } else {
                 None
             }
@@ -654,11 +586,7 @@ pub fn detect_display(
     }
 
     info!(display_server = "Unknown", "display detection");
-    DisplayProfile {
-        server: DisplayServer::Unknown,
-        primary_res: (1920, 1080),
-        refresh_hz: 60.0,
-    }
+    DisplayProfile { server: DisplayServer::Unknown, primary_res: (1920, 1080), refresh_hz: 60.0 }
 }
 
 // ---------------------------------------------------------------------------
@@ -668,9 +596,8 @@ pub fn detect_display(
 /// Detect Linux distro from /etc/os-release.
 pub fn detect_distro(etc_root: &Path) -> Result<DistroInfo, PlayError> {
     let path = etc_root.join("os-release");
-    let contents = fs::read_to_string(&path).map_err(|_| PlayError::HardwareDetection {
-        component: "distro".into(),
-    })?;
+    let contents = fs::read_to_string(&path)
+        .map_err(|_| PlayError::HardwareDetection { component: "distro".into() })?;
 
     let mut id = String::new();
     let mut version_id = String::new();
@@ -685,7 +612,7 @@ pub fn detect_distro(etc_root: &Path) -> Result<DistroInfo, PlayError> {
                 "ID" => id = value.to_string(),
                 "VERSION_ID" => version_id = value.to_string(),
                 "PRETTY_NAME" => pretty_name = value.to_string(),
-                _ => {}
+                _ => {},
             }
         }
     }
@@ -709,11 +636,7 @@ pub fn detect_distro(etc_root: &Path) -> Result<DistroInfo, PlayError> {
         "distro detection complete"
     );
 
-    Ok(DistroInfo {
-        distro,
-        version_id,
-        pretty_name,
-    })
+    Ok(DistroInfo { distro, version_id, pretty_name })
 }
 
 // ---------------------------------------------------------------------------
@@ -751,14 +674,14 @@ pub fn detect_hardware(
             if let Err(e) = enrich_nvidia_gpu(&mut gpu, cmd_runner) {
                 warn!("nvidia gpu enrichment failed: {e}");
             }
-        }
+        },
         GpuVendor::AMD => {
             enrich_amd_gpu(&mut gpu);
-        }
+        },
         GpuVendor::Intel => {
             enrich_intel_gpu(&mut gpu);
-        }
-        GpuVendor::Unknown => {}
+        },
+        GpuVendor::Unknown => {},
     }
 
     // Check if GPU is a laptop GPU
@@ -773,17 +696,7 @@ pub fn detect_hardware(
         cpu.vendor as i32, gpu.vendor as i32, distro.distro as i32
     );
 
-    Ok(DetectionResult {
-        hw: HardwareProfile {
-            gpu,
-            cpu,
-            memory,
-            kernel,
-            display,
-            distro,
-        },
-        audio,
-    })
+    Ok(DetectionResult { hw: HardwareProfile { gpu, cpu, memory, kernel, display, distro }, audio })
 }
 
 #[cfg(test)]
@@ -797,10 +710,7 @@ mod tests {
 
     impl CommandRunner for MockCommandRunner {
         fn run_command(&self, program: &str, _args: &[&str]) -> Result<String, String> {
-            self.responses
-                .get(program)
-                .cloned()
-                .unwrap_or(Err("command not mocked".into()))
+            self.responses.get(program).cloned().unwrap_or(Err("command not mocked".into()))
         }
 
         fn clone_boxed(&self) -> Box<dyn CommandRunner> {
@@ -818,21 +728,13 @@ mod tests {
 
     #[test]
     fn test_kernel_has_futex2_true() {
-        let v = KernelVersion {
-            major: 5,
-            minor: 16,
-            patch: 0,
-        };
+        let v = KernelVersion { major: 5, minor: 16, patch: 0 };
         assert!(kernel_has_futex2(&v));
     }
 
     #[test]
     fn test_kernel_has_futex2_false() {
-        let v = KernelVersion {
-            major: 5,
-            minor: 15,
-            patch: 0,
-        };
+        let v = KernelVersion { major: 5, minor: 15, patch: 0 };
         assert!(!kernel_has_futex2(&v));
     }
 
@@ -875,9 +777,7 @@ mod tests {
     #[test]
     fn test_detect_gpu_lspci_empty() {
         let runner = MockCommandRunner {
-            responses: vec![("lspci".to_string(), Ok(String::new()))]
-                .into_iter()
-                .collect(),
+            responses: vec![("lspci".to_string(), Ok(String::new()))].into_iter().collect(),
         };
 
         let gpu = detect_gpu_lspci(&runner).unwrap();
@@ -889,9 +789,7 @@ mod tests {
         let output =
             "00:1f.0\t\"VGA compatible\"\t\"10de:2506\"\t\"Nvidia Corp\"\t\"RTX3050\"\t\"1028:000\"\n";
         let runner = MockCommandRunner {
-            responses: vec![("lspci".to_string(), Ok(output.to_string()))]
-                .into_iter()
-                .collect(),
+            responses: vec![("lspci".to_string(), Ok(output.to_string()))].into_iter().collect(),
         };
 
         let gpu = detect_gpu_lspci(&runner).unwrap();
@@ -920,12 +818,9 @@ mod tests {
         };
 
         let runner = MockCommandRunner {
-            responses: vec![(
-                "nvidia-smi".to_string(),
-                Ok("1777, 6144, 535.113\n".to_string()),
-            )]
-            .into_iter()
-            .collect(),
+            responses: vec![("nvidia-smi".to_string(), Ok("1777, 6144, 535.113\n".to_string()))]
+                .into_iter()
+                .collect(),
         };
 
         enrich_nvidia_gpu(&mut gpu, &runner).unwrap();
@@ -986,11 +881,8 @@ mod tests {
     #[test]
     fn test_detect_distro_unknown() {
         let tempdir = tempfile::tempdir().unwrap();
-        fs::write(
-            tempdir.path().join("os-release"),
-            "ID=unknown_distro\nVERSION_ID=1.0\n",
-        )
-        .unwrap();
+        fs::write(tempdir.path().join("os-release"), "ID=unknown_distro\nVERSION_ID=1.0\n")
+            .unwrap();
 
         let result = detect_distro(tempdir.path());
         assert!(result.is_err());

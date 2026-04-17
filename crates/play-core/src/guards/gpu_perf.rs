@@ -70,11 +70,11 @@ impl GpuPerfGuard {
                     })?;
                 let prev_persistence = prev_persistence.trim().to_owned();
 
-                cmd_runner
-                    .run_command("nvidia-smi", &["-pm", "1"])
-                    .map_err(|e| PlayError::GpuPerfWrite {
+                cmd_runner.run_command("nvidia-smi", &["-pm", "1"]).map_err(|e| {
+                    PlayError::GpuPerfWrite {
                         reason: format!("failed to enable persistence mode: {e}"),
-                    })?;
+                    }
+                })?;
 
                 tracing::info!(
                     event = "tweak_applied",
@@ -92,9 +92,9 @@ impl GpuPerfGuard {
                     );
                     None
                 } else {
-                    let lock = gpu
-                        .nvidia_vbios_max_clock_mhz
-                        .map(crate::modules::decision_engine::DecisionEngine::compute_nvidia_lock_clock);
+                    let lock = gpu.nvidia_vbios_max_clock_mhz.map(
+                        crate::modules::decision_engine::DecisionEngine::compute_nvidia_lock_clock,
+                    );
 
                     if let Some(mhz) = lock {
                         if mhz == 0 {
@@ -111,7 +111,9 @@ impl GpuPerfGuard {
                                     // Restore persistence mode before returning error
                                     let _ = cmd_runner.run_command("nvidia-smi", &["-pm", "0"]);
                                     PlayError::GpuPerfWrite {
-                                        reason: format!("failed to lock GPU clocks to {mhz} MHz: {e}"),
+                                        reason: format!(
+                                            "failed to lock GPU clocks to {mhz} MHz: {e}"
+                                        ),
                                     }
                                 })?;
 
@@ -126,18 +128,15 @@ impl GpuPerfGuard {
                         tracing::warn!(
                             event = "tweak_skipped",
                             tweak = "gpu_perf.clock_lock",
-                            reason = "NVIDIA VBIOS max clock not detected; cannot compute lock value"
+                            reason =
+                                "NVIDIA VBIOS max clock not detected; cannot compute lock value"
                         );
                     }
                     lock.filter(|&v| v > 0)
                 };
 
-                Ok(Self::Nvidia {
-                    prev_persistence,
-                    clock_lock_mhz,
-                    cmd_runner,
-                })
-            }
+                Ok(Self::Nvidia { prev_persistence, clock_lock_mhz, cmd_runner })
+            },
             GpuVendor::AMD => {
                 tracing::warn!(
                     event = "phase2_stub",
@@ -145,7 +144,7 @@ impl GpuPerfGuard {
                     "AMD GPU perf tweaks not implemented in v1"
                 );
                 Ok(Self::Noop)
-            }
+            },
             GpuVendor::Intel | GpuVendor::Unknown => Ok(Self::Noop),
         }
     }
@@ -158,12 +157,7 @@ impl GpuPerfGuard {
 
 impl Drop for GpuPerfGuard {
     fn drop(&mut self) {
-        if let Self::Nvidia {
-            prev_persistence,
-            clock_lock_mhz,
-            cmd_runner,
-        } = self
-        {
+        if let Self::Nvidia { prev_persistence, clock_lock_mhz, cmd_runner } = self {
             // Reset clocks first (if they were locked)
             if clock_lock_mhz.is_some() {
                 if let Err(e) = cmd_runner.run_command("nvidia-smi", &["-rgc"]) {
@@ -174,19 +168,12 @@ impl Drop for GpuPerfGuard {
                         error = %e
                     );
                 } else {
-                    tracing::info!(
-                        event = "tweak_restored",
-                        tweak = "gpu_perf.clock_lock"
-                    );
+                    tracing::info!(event = "tweak_restored", tweak = "gpu_perf.clock_lock");
                 }
             }
 
             // Restore persistence mode
-            let pm_val = if prev_persistence.contains("Enabled") {
-                "1"
-            } else {
-                "0"
-            };
+            let pm_val = if prev_persistence.contains("Enabled") { "1" } else { "0" };
             if let Err(e) = cmd_runner.run_command("nvidia-smi", &["-pm", pm_val]) {
                 tracing::error!(
                     event = "restore_failed",
@@ -222,17 +209,17 @@ mod tests {
     // Mock CommandRunner
     // -----------------------------------------------------------------------
 
+    type CallLog = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+
     #[derive(Clone)]
     struct MockCommandRunner {
         responses: Arc<HashMap<String, Result<String, String>>>,
         /// Record of commands that were actually executed.
-        calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+        calls: CallLog,
     }
 
     impl MockCommandRunner {
-        fn new(
-            responses: impl IntoIterator<Item = (String, Result<String, String>)>,
-        ) -> Self {
+        fn new(responses: impl IntoIterator<Item = (String, Result<String, String>)>) -> Self {
             Self {
                 responses: Arc::new(responses.into_iter().collect()),
                 calls: Arc::new(Mutex::new(Vec::new())),
@@ -325,12 +312,12 @@ mod tests {
 
     fn nvidia_responses() -> Vec<(String, Result<String, String>)> {
         vec![
-                ("nvidia-smi---query-gpu=persistence_mode".to_owned(), Ok("Disabled".to_owned())),
-                ("nvidia-smi--pm".to_owned(), Ok("".to_owned())),
-                ("nvidia-smi--lgc".to_owned(), Ok("".to_owned())),
-                ("nvidia-smi--rgc".to_owned(), Ok("".to_owned())),
-                ("nvidia-smi--pm".to_owned(), Ok("".to_owned())),
-            ]
+            ("nvidia-smi---query-gpu=persistence_mode".to_owned(), Ok("Disabled".to_owned())),
+            ("nvidia-smi--pm".to_owned(), Ok("".to_owned())),
+            ("nvidia-smi--lgc".to_owned(), Ok("".to_owned())),
+            ("nvidia-smi--rgc".to_owned(), Ok("".to_owned())),
+            ("nvidia-smi--pm".to_owned(), Ok("".to_owned())),
+        ]
     }
 
     // -----------------------------------------------------------------------
@@ -342,15 +329,11 @@ mod tests {
         let gpu = nvidia_desktop_gpu();
         let runner = MockCommandRunner::new(nvidia_responses());
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
+        let guard =
+            GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
         assert!(guard.is_active());
 
-        if let GpuPerfGuard::Nvidia {
-            prev_persistence,
-            clock_lock_mhz,
-            cmd_runner: _,
-        } = &guard
-        {
+        if let GpuPerfGuard::Nvidia { prev_persistence, clock_lock_mhz, cmd_runner: _ } = &guard {
             assert_eq!(prev_persistence, "Disabled");
             // RTX 3060: vbios_max=1777 → (1777*95)/100=1688 → (1688/15)*15=1680
             assert_eq!(*clock_lock_mhz, Some(1680));
@@ -383,15 +366,11 @@ mod tests {
         ];
         let runner = MockCommandRunner::new(responses);
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
+        let guard =
+            GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
         assert!(guard.is_active());
 
-        if let GpuPerfGuard::Nvidia {
-            prev_persistence,
-            clock_lock_mhz,
-            cmd_runner: _,
-        } = &guard
-        {
+        if let GpuPerfGuard::Nvidia { prev_persistence, clock_lock_mhz, cmd_runner: _ } = &guard {
             assert_eq!(prev_persistence, "Disabled");
             assert_eq!(*clock_lock_mhz, None);
         } else {
@@ -423,7 +402,8 @@ mod tests {
         gpu.vendor = GpuVendor::Intel;
         let runner = MockCommandRunner::new(Vec::new());
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::Intel, &gpu, Box::new(runner.clone())).unwrap();
+        let guard =
+            GpuPerfGuard::set_max(&GpuVendor::Intel, &gpu, Box::new(runner.clone())).unwrap();
         assert!(!guard.is_active());
         assert!(matches!(guard, GpuPerfGuard::Noop));
     }
@@ -433,14 +413,10 @@ mod tests {
         let gpu = nvidia_desktop_gpu();
         let runner = MockCommandRunner::new(nvidia_responses());
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
+        let guard =
+            GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
 
-        if let GpuPerfGuard::Nvidia {
-            prev_persistence,
-            clock_lock_mhz,
-            cmd_runner: _,
-        } = &guard
-        {
+        if let GpuPerfGuard::Nvidia { prev_persistence, clock_lock_mhz, cmd_runner: _ } = &guard {
             assert_eq!(prev_persistence, "Disabled");
             assert_eq!(*clock_lock_mhz, Some(1680));
         } else {
@@ -501,9 +477,10 @@ mod tests {
     #[test]
     fn persistence_mode_failure_returns_error() {
         let gpu = nvidia_desktop_gpu();
-        let responses = vec![
-            ("nvidia-smi---query-gpu=persistence_mode".to_owned(), Err("nvidia-smi not found".to_owned())),
-        ];
+        let responses = vec![(
+            "nvidia-smi---query-gpu=persistence_mode".to_owned(),
+            Err("nvidia-smi not found".to_owned()),
+        )];
         let runner = MockCommandRunner::new(responses);
 
         let result = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner));
@@ -527,7 +504,11 @@ mod tests {
 
         // Verify persistence was restored (4th call = -pm 0)
         let calls = runner.calls();
-        let restore_call = calls.iter().find(|c| c.0 == "nvidia-smi" && c.1.contains(&"0".to_owned()));
-        assert!(restore_call.is_some(), "persistence mode should be restored on clock lock failure");
+        let restore_call =
+            calls.iter().find(|c| c.0 == "nvidia-smi" && c.1.contains(&"0".to_owned()));
+        assert!(
+            restore_call.is_some(),
+            "persistence mode should be restored on clock lock failure"
+        );
     }
 }

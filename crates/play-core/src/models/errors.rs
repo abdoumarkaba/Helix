@@ -18,11 +18,7 @@ pub enum PlayError {
     AntiCheatBlocked { name: String },
 
     #[error("Runner download failed: {url} (attempt {attempt}/3): {reason}")]
-    RunnerDownload {
-        url: String,
-        attempt: u8,
-        reason: String,
-    },
+    RunnerDownload { url: String, attempt: u8, reason: String },
 
     #[error(
         "Runner checksum mismatch. Expected {expected}, got {actual}. \
@@ -31,17 +27,10 @@ pub enum PlayError {
     ChecksumMismatch { expected: String, actual: String },
 
     #[error("Package manager {pm} failed to install {package}: {stderr}")]
-    PackageInstall {
-        pm: String,
-        package: String,
-        stderr: String,
-    },
+    PackageInstall { pm: String, package: String, stderr: String },
 
     #[error("Wine prefix creation failed at {prefix_path}: {reason}")]
-    PrefixCreation {
-        prefix_path: PathBuf,
-        reason: String,
-    },
+    PrefixCreation { prefix_path: PathBuf, reason: String },
 
     #[error("Sysctl write to {key} failed (requires elevated helper): {reason}")]
     SysctlWrite { key: String, reason: String },
@@ -56,12 +45,7 @@ pub enum PlayError {
         "Rollback failed for {key}: {reason}. \
          Manual restoration: write '{previous_value}' to {path}"
     )]
-    RollbackFailed {
-        key: String,
-        reason: String,
-        previous_value: String,
-        path: PathBuf,
-    },
+    RollbackFailed { key: String, reason: String, previous_value: String, path: PathBuf },
 
     #[error("State file corrupted at {path}. Run `play --reset {{game}}` to start fresh.")]
     StateCorrupted { path: PathBuf },
@@ -91,10 +75,7 @@ pub enum PlayError {
         "No {runner_type} runner satisfies version floor {version_min}. \
          Run `play --update-db` to refresh the runner manifest."
     )]
-    NoRunnerAvailable {
-        runner_type: String,
-        version_min: String,
-    },
+    NoRunnerAvailable { runner_type: String, version_min: String },
 
     #[error("Failed to read DB entry at {path}: {reason}")]
     DbEntryReadFailed { path: PathBuf, reason: String },
@@ -110,4 +91,16 @@ pub enum PlayError {
 
     #[error("GPU perf mode write failed: {reason}")]
     GpuPerfWrite { reason: String },
+
+    #[error("Orchestrator failed in phase {phase}: {reason}")]
+    OrchestratorFailed { phase: String, reason: String },
+
+    #[error("Checkpoint operation failed at {path}: {reason}")]
+    CheckpointFailed { path: PathBuf, reason: String },
+
+    #[error("Validation failed: {reason}")]
+    ValidationFailed { reason: String },
+
+    #[error("Database update failed: {reason}")]
+    DatabaseUpdateFailed { reason: String },
 }

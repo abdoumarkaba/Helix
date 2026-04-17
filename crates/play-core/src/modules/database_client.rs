@@ -35,18 +35,13 @@ impl DatabaseReader for DatabaseClient {
             return Ok(None);
         }
         let prefix = &exe_hash[..2];
-        let entry_path = self
-            .db_root
-            .join("entries")
-            .join(prefix)
-            .join(exe_hash)
-            .join("default.toml");
+        let entry_path =
+            self.db_root.join("entries").join(prefix).join(exe_hash).join("default.toml");
         if !entry_path.exists() {
             return Ok(None);
         }
-        let raw = std::fs::read_to_string(&entry_path).map_err(|e| PlayError::DbEntryReadFailed {
-            path: entry_path.clone(),
-            reason: e.to_string(),
+        let raw = std::fs::read_to_string(&entry_path).map_err(|e| {
+            PlayError::DbEntryReadFailed { path: entry_path.clone(), reason: e.to_string() }
         })?;
         let entry: DbEntry = toml::from_str(&raw).map_err(|e| PlayError::DatabaseCorrupted {
             hash: exe_hash.to_owned(),
@@ -60,14 +55,11 @@ impl DatabaseReader for DatabaseClient {
         if !path.exists() {
             return Err(PlayError::RunnersManifestMissing { path });
         }
-        let raw = std::fs::read_to_string(&path).map_err(|e| PlayError::RunnersManifestReadFailed {
-            path: path.clone(),
-            reason: e.to_string(),
+        let raw = std::fs::read_to_string(&path).map_err(|e| {
+            PlayError::RunnersManifestReadFailed { path: path.clone(), reason: e.to_string() }
         })?;
-        toml::from_str(&raw).map_err(|e| PlayError::RunnersManifestParseFailed {
-            path,
-            reason: e.to_string(),
-        })
+        toml::from_str(&raw)
+            .map_err(|e| PlayError::RunnersManifestParseFailed { path, reason: e.to_string() })
     }
 }
 
@@ -106,9 +98,7 @@ pub struct FixtureReader {
 
 impl FixtureReader {
     pub fn new(fixture_root: impl Into<PathBuf>) -> Self {
-        Self {
-            fixture_root: fixture_root.into(),
-        }
+        Self { fixture_root: fixture_root.into() }
     }
 }
 
@@ -118,12 +108,8 @@ impl DatabaseReader for FixtureReader {
             return Ok(None);
         }
         let prefix = &exe_hash[..2];
-        let path = self
-            .fixture_root
-            .join("entries")
-            .join(prefix)
-            .join(exe_hash)
-            .join("default.toml");
+        let path =
+            self.fixture_root.join("entries").join(prefix).join(exe_hash).join("default.toml");
         if !path.exists() {
             return Ok(None);
         }
@@ -144,13 +130,10 @@ impl DatabaseReader for FixtureReader {
         if !path.exists() {
             return Err(PlayError::RunnersManifestMissing { path });
         }
-        let raw = std::fs::read_to_string(&path).map_err(|e| PlayError::RunnersManifestReadFailed {
-            path: path.clone(),
-            reason: e.to_string(),
+        let raw = std::fs::read_to_string(&path).map_err(|e| {
+            PlayError::RunnersManifestReadFailed { path: path.clone(), reason: e.to_string() }
         })?;
-        toml::from_str(&raw).map_err(|e| PlayError::RunnersManifestParseFailed {
-            path,
-            reason: e.to_string(),
-        })
+        toml::from_str(&raw)
+            .map_err(|e| PlayError::RunnersManifestParseFailed { path, reason: e.to_string() })
     }
 }

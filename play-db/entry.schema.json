@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "entry.schema.json",
+  "title": "play-db Entry Schema",
+  "description": "Schema for play-db game compatibility entries",
+  "type": "object",
+  "required": ["runner_version_min"],
+  "properties": {
+    "runner_version_min": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "description": "Minimum runner version required (semver). Play selects latest stable above this floor."
+    },
+    "runner_type_override": {
+      "type": "string",
+      "enum": ["ProtonGE", "WineGE", "ProtonOfficial", "WineStaging", "SodaWine"],
+      "description": "Override default runner type selection"
+    },
+    "windows_version_override": {
+      "type": "string",
+      "enum": ["WinXP", "Win7", "Win8", "Win10", "Win11"],
+      "description": "Override Windows version reported to game"
+    },
+    "dll_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["dll", "mode"],
+        "properties": {
+          "dll": {
+            "type": "string",
+            "description": "DLL name (e.g., d3d9, dxgi)"
+          },
+          "mode": {
+            "type": "string",
+            "description": "Override mode (e.g., native,builtin)"
+          }
+        }
+      },
+      "description": "DLL overrides to apply in Wine prefix"
+    },
+    "extra_env_vars": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Additional environment variables for this game"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Maintainer notes about this configuration"
+    }
+  }
+}

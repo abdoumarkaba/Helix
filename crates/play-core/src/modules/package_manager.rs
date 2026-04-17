@@ -58,15 +58,14 @@ impl PackageManager for AptPm {
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
-        let output = Command::new("apt-get")
-            .args(["install", "-y"])
-            .args(packages)
-            .output()
-            .map_err(|e| PlayError::PackageInstall {
-                pm: "apt".into(),
-                package: packages.join(", "),
-                stderr: e.to_string(),
-            })?;
+        let output =
+            Command::new("apt-get").args(["install", "-y"]).args(packages).output().map_err(
+                |e| PlayError::PackageInstall {
+                    pm: "apt".into(),
+                    package: packages.join(", "),
+                    stderr: e.to_string(),
+                },
+            )?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -107,14 +106,13 @@ impl PackageManager for DnfPm {
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
-        let output = Command::new("dnf")
-            .args(["install", "-y"])
-            .args(packages)
-            .output()
-            .map_err(|e| PlayError::PackageInstall {
-                pm: "dnf".into(),
-                package: packages.join(", "),
-                stderr: e.to_string(),
+        let output =
+            Command::new("dnf").args(["install", "-y"]).args(packages).output().map_err(|e| {
+                PlayError::PackageInstall {
+                    pm: "dnf".into(),
+                    package: packages.join(", "),
+                    stderr: e.to_string(),
+                }
             })?;
 
         if !output.status.success() {
@@ -156,15 +154,14 @@ impl PackageManager for PacmanPm {
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
-        let output = Command::new("pacman")
-            .args(["-S", "--noconfirm"])
-            .args(packages)
-            .output()
-            .map_err(|e| PlayError::PackageInstall {
-                pm: "pacman".into(),
-                package: packages.join(", "),
-                stderr: e.to_string(),
-            })?;
+        let output =
+            Command::new("pacman").args(["-S", "--noconfirm"]).args(packages).output().map_err(
+                |e| PlayError::PackageInstall {
+                    pm: "pacman".into(),
+                    package: packages.join(", "),
+                    stderr: e.to_string(),
+                },
+            )?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -205,15 +202,14 @@ impl PackageManager for ZypperPm {
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
-        let output = Command::new("zypper")
-            .args(["install", "-y"])
-            .args(packages)
-            .output()
-            .map_err(|e| PlayError::PackageInstall {
-                pm: "zypper".into(),
-                package: packages.join(", "),
-                stderr: e.to_string(),
-            })?;
+        let output =
+            Command::new("zypper").args(["install", "-y"]).args(packages).output().map_err(
+                |e| PlayError::PackageInstall {
+                    pm: "zypper".into(),
+                    package: packages.join(", "),
+                    stderr: e.to_string(),
+                },
+            )?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -247,39 +243,21 @@ pub fn detect_package_manager(
     cmd_runner: &dyn crate::modules::detection::CommandRunner,
 ) -> Result<Box<dyn PackageManager>, PlayError> {
     // apt
-    if cmd_runner
-        .run_command("apt", &["--version"])
-        .map(|_| true)
-        .unwrap_or(false)
-    {
+    if cmd_runner.run_command("apt", &["--version"]).map(|_| true).unwrap_or(false) {
         return Ok(Box::new(AptPm));
     }
     // dnf / yum
-    if cmd_runner
-        .run_command("dnf", &["--version"])
-        .map(|_| true)
-        .unwrap_or(false)
-    {
+    if cmd_runner.run_command("dnf", &["--version"]).map(|_| true).unwrap_or(false) {
         return Ok(Box::new(DnfPm));
     }
     // pacman
-    if cmd_runner
-        .run_command("pacman", &["--version"])
-        .map(|_| true)
-        .unwrap_or(false)
-    {
+    if cmd_runner.run_command("pacman", &["--version"]).map(|_| true).unwrap_or(false) {
         return Ok(Box::new(PacmanPm));
     }
     // zypper (SUSE / openSUSE)
-    if cmd_runner
-        .run_command("zypper", &["--version"])
-        .map(|_| true)
-        .unwrap_or(false)
-    {
+    if cmd_runner.run_command("zypper", &["--version"]).map(|_| true).unwrap_or(false) {
         return Ok(Box::new(ZypperPm));
     }
 
-    Err(PlayError::UnsupportedDistro {
-        distro: "unknown".into(),
-    })
+    Err(PlayError::UnsupportedDistro { distro: "unknown".into() })
 }

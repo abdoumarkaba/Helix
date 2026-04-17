@@ -462,17 +462,9 @@ pub struct EnvironmentMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ResolutionSource {
     FullyAutomatic,
-    DatabaseAssisted {
-        entry_id: String,
-        confidence: f32,
-    },
-    UserOverridden {
-        fields: Vec<String>,
-    },
-    Hybrid {
-        db_fields: Vec<String>,
-        heuristic_fields: Vec<String>,
-    },
+    DatabaseAssisted { entry_id: String, confidence: f32 },
+    UserOverridden { fields: Vec<String> },
+    Hybrid { db_fields: Vec<String>, heuristic_fields: Vec<String> },
 }
 
 /// Every decision the Planning Agent makes is recorded here.

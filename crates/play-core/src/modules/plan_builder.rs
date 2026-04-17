@@ -32,12 +32,7 @@ impl<'a> PlanBuilder<'a> {
         prefix_root: PathBuf,
         runners_install_root: PathBuf,
     ) -> Self {
-        Self {
-            env,
-            db,
-            prefix_root,
-            runners_install_root,
-        }
+        Self { env, db, prefix_root, runners_install_root }
     }
 
     /// Build the GamePlan. Pure: no filesystem writes, no system calls.
@@ -98,10 +93,8 @@ impl<'a> PlanBuilder<'a> {
         let (prefix_arch, dec) = DecisionEngine::select_prefix_arch(self.env.identity.pe_arch);
         decisions.push(dec);
 
-        let (windows_version, dec) = DecisionEngine::select_windows_version(
-            db_entry.as_ref(),
-            self.env.identity.dx_version,
-        );
+        let (windows_version, dec) =
+            DecisionEngine::select_windows_version(db_entry.as_ref(), self.env.identity.dx_version);
         decisions.push(dec);
 
         let (prefix_action, dec) = DecisionEngine::resolve_prefix_action(
@@ -125,10 +118,7 @@ impl<'a> PlanBuilder<'a> {
         env.graphics.translation_layer = translation_layer;
         env.graphics.dxvk_config.async_compile = async_compile;
         env.graphics.gamemode = tweaks.iter().any(|t| {
-            matches!(
-                t.decision,
-                TweakDecision::Apply(crate::models::plan::SystemTweak::GameMode)
-            )
+            matches!(t.decision, TweakDecision::Apply(crate::models::plan::SystemTweak::GameMode))
         });
 
         // Fill runner
@@ -168,19 +158,13 @@ impl<'a> PlanBuilder<'a> {
         if self.env.identity.pe_arch == crate::models::environment::PeArchitecture::X86
             && self.env.hardware.gpu.vram_mb > 2048
         {
-            env.launch.env.insert(
-                "WINE_LARGE_ADDRESS_AWARE".to_owned(),
-                "1".to_owned(),
-            );
+            env.launch.env.insert("WINE_LARGE_ADDRESS_AWARE".to_owned(), "1".to_owned());
         }
 
         // Spec §11: VKD3D_FEATURE_LEVEL when VKD3D-Proton is selected
         if translation_layer == crate::models::environment::TranslationLayer::Vkd3dProton {
             if let Some(ref fl) = self.env.hardware.gpu.features.dx12_feature_level {
-                env.launch.env.insert(
-                    "VKD3D_FEATURE_LEVEL".to_owned(),
-                    format!("12_{}", fl),
-                );
+                env.launch.env.insert("VKD3D_FEATURE_LEVEL".to_owned(), format!("12_{}", fl));
             }
         }
 
@@ -229,7 +213,7 @@ impl<'a> PlanBuilder<'a> {
                             reason: "Kernel lacks futex2; esync used instead.".to_owned(),
                         }
                     }
-                }
+                },
                 TweakId::Esync => {
                     if esync {
                         TweakDecision::Apply(crate::models::plan::SystemTweak::Esync)
@@ -238,7 +222,7 @@ impl<'a> PlanBuilder<'a> {
                             reason: "Fsync available; esync not needed.".to_owned(),
                         }
                     }
-                }
+                },
                 TweakId::DxvkAsync => {
                     if async_compile {
                         TweakDecision::Apply(crate::models::plan::SystemTweak::DxvkAsync {
@@ -246,10 +230,11 @@ impl<'a> PlanBuilder<'a> {
                         })
                     } else {
                         TweakDecision::NotApplicable {
-                            reason: "Anti-cheat present; async shader compilation disabled.".to_owned(),
+                            reason: "Anti-cheat present; async shader compilation disabled."
+                                .to_owned(),
                         }
                     }
-                }
+                },
                 _ => DecisionEngine::resolve_tweak(constraint, hw, current_vm),
             };
 
@@ -265,13 +250,7 @@ impl<'a> PlanBuilder<'a> {
         // (In a real implementation we'd check if gamemoded binary exists.)
         // For now, absence is detected via `gamemode` flag in env.
         // MangoHud: not currently in HardwareProfile — warn unconditionally if not in env.
-        if !self
-            .env
-            .graphics
-            .mangohud
-            .as_ref()
-            .is_some_and(|m| m.enabled)
-        {
+        if !self.env.graphics.mangohud.as_ref().is_some_and(|m| m.enabled) {
             warnings.push(PlanWarning {
                 message: "MangoHud not configured — performance overlay unavailable.".to_owned(),
                 install_hint: Some(self.mangohud_hint()),
@@ -303,15 +282,15 @@ impl<'a> PlanBuilder<'a> {
                     reason: "D3D8/9/10/11-to-Vulkan translation layer.".to_owned(),
                     already_installed: false,
                 });
-            }
+            },
             TranslationLayer::Vkd3dProton => {
                 pkgs.push(RequiredPackage {
                     name: "vkd3d-proton".to_owned(),
                     reason: "D3D12-to-Vulkan translation layer.".to_owned(),
                     already_installed: false,
                 });
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         pkgs
@@ -326,7 +305,7 @@ impl<'a> PlanBuilder<'a> {
             Distro::OpenSUSE => "sudo zypper install mangohud".to_owned(),
             Distro::Unknown => {
                 "Install mangohud from your distribution's package manager.".to_owned()
-            }
+            },
         }
     }
 
@@ -337,12 +316,8 @@ impl<'a> PlanBuilder<'a> {
             warnings: Vec::new(),
             hard_blocks,
             required_packages: Vec::new(),
-            runner_action: RunnerAction::AlreadyInstalled {
-                path: PathBuf::new(),
-            },
-            prefix_action: PrefixAction::AlreadyExists {
-                path: PathBuf::new(),
-            },
+            runner_action: RunnerAction::AlreadyInstalled { path: PathBuf::new() },
+            prefix_action: PrefixAction::AlreadyExists { path: PathBuf::new() },
             tweaks: Vec::new(),
             db_hit,
         }
@@ -357,38 +332,37 @@ fn apply_tweak_to_system(system: &mut SystemTuning, t: &PlannedTweak) {
         match tw {
             SystemTweak::VmMaxMapCount { target } => {
                 system.vm_max_map_count = Some(*target);
-            }
+            },
             SystemTweak::ThpMadvise => {
                 system.thp_mode = Some(ThpMode::Madvise);
-            }
+            },
             SystemTweak::SchedAutogroup { enabled } => {
                 system.sched_autogroup = Some(*enabled);
-            }
+            },
             SystemTweak::SplitLockMitigate { enabled } => {
                 system.split_lock_mitigate = Some(*enabled);
-            }
+            },
             SystemTweak::UlimitNofile { value } => {
                 system.ulimit_nofile = Some(*value);
-            }
+            },
             SystemTweak::CpuGovernorPerformance => {
                 system.cpu_governor = Some(CpuGovernor::Performance);
-            }
+            },
             SystemTweak::Fsync => {
                 system.fsync = true;
-            }
+            },
             SystemTweak::Esync => {
                 system.esync = true;
-            }
+            },
             SystemTweak::GameMode => {
                 system.gamemode = true;
-            }
-            SystemTweak::NvidiaPersistenceMode
-            | SystemTweak::DxvkAsync { .. } => {
+            },
+            SystemTweak::NvidiaPersistenceMode | SystemTweak::DxvkAsync { .. } => {
                 // Handled by GraphicsConfig or written by SystemModule directly.
-            }
+            },
             SystemTweak::NvidiaClockLock { max_mhz, .. } => {
                 system.nvidia_clock_lock_mhz = Some(*max_mhz);
-            }
+            },
         }
     }
 }

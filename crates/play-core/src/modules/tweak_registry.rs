@@ -230,10 +230,7 @@ mod tests {
         ];
         let registry = all();
         for id in all_ids {
-            assert!(
-                registry.iter().any(|c| c.id == id),
-                "TweakId::{id:?} missing from registry"
-            );
+            assert!(registry.iter().any(|c| c.id == id), "TweakId::{id:?} missing from registry");
         }
     }
 
@@ -258,11 +255,7 @@ mod tests {
     #[test]
     fn all_tweaks_have_rationale() {
         for c in all() {
-            assert!(
-                !c.rationale.is_empty(),
-                "TweakId::{:?} has empty rationale",
-                c.id
-            );
+            assert!(!c.rationale.is_empty(), "TweakId::{:?} has empty rationale", c.id);
         }
     }
 }

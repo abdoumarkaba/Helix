@@ -7,9 +7,9 @@
 use semver::Version;
 
 use crate::models::environment::{
-    AntiCheat, AudioBackend, Confidence, DecisionSource, DirectXVersion, GameEngine,
-    GameIdentity, KernelProfile, PeArchitecture, ResolutionDecision, RunnerType,
-    TranslationLayer, WindowsVersion, WineArch, WineAudioDriver,
+    AntiCheat, AudioBackend, Confidence, DecisionSource, DirectXVersion, GameEngine, GameIdentity,
+    KernelProfile, PeArchitecture, ResolutionDecision, RunnerType, TranslationLayer,
+    WindowsVersion, WineArch, WineAudioDriver,
 };
 use crate::models::errors::PlayError;
 use crate::models::plan::{
@@ -30,21 +30,17 @@ impl DecisionEngine {
     pub fn check_hard_blocks(anti_cheat: &[AntiCheat]) -> Result<(), PlayError> {
         for ac in anti_cheat {
             match ac {
-                AntiCheat::EasyAntiCheat {
-                    linux_supported: false,
-                } => {
+                AntiCheat::EasyAntiCheat { linux_supported: false } => {
                     return Err(PlayError::AntiCheatBlocked {
                         name: "EasyAntiCheat (no Linux support)".to_owned(),
                     });
-                }
-                AntiCheat::BattlEye {
-                    linux_supported: false,
-                } => {
+                },
+                AntiCheat::BattlEye { linux_supported: false } => {
                     return Err(PlayError::AntiCheatBlocked {
                         name: "BattlEye (no Linux support)".to_owned(),
                     });
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
         Ok(())
@@ -144,9 +140,7 @@ impl DecisionEngine {
         identity: &GameIdentity,
     ) -> Result<(RunnerType, Version, ResolutionDecision), PlayError> {
         // DB can override runner type (e.g. wine-ge for very old 32-bit games).
-        let runner_type = db
-            .and_then(|d| d.runner_type_override)
-            .unwrap_or(RunnerType::ProtonGE);
+        let runner_type = db.and_then(|d| d.runner_type_override).unwrap_or(RunnerType::ProtonGE);
 
         let version_floor: Option<Version> = db.and_then(|d| d.runner_version_min.clone());
 
@@ -154,23 +148,18 @@ impl DecisionEngine {
             .runners
             .iter()
             .filter(|r| r.runner_type == runner_type)
-            .filter(|r| {
-                version_floor
-                    .as_ref()
-                    .map_or(true, |floor| &r.version >= floor)
-            })
+            .filter(|r| version_floor.as_ref().map_or(true, |floor| &r.version >= floor))
             .collect();
 
-        let best = candidates
-            .iter()
-            .max_by(|a, b| a.version.cmp(&b.version))
-            .ok_or_else(|| PlayError::NoRunnerAvailable {
+        let best = candidates.iter().max_by(|a, b| a.version.cmp(&b.version)).ok_or_else(|| {
+            PlayError::NoRunnerAvailable {
                 runner_type: format!("{runner_type:?}"),
                 version_min: version_floor
                     .as_ref()
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "any".to_owned()),
-            })?;
+            }
+        })?;
 
         let source_note = if db.and_then(|d| d.runner_type_override).is_some() {
             "play-db specifies runner type; "
@@ -191,9 +180,7 @@ impl DecisionEngine {
             None
         };
 
-        let reason_suffix = identity_reason
-            .map(|r| format!("; {r}"))
-            .unwrap_or_default();
+        let reason_suffix = identity_reason.map(|r| format!("; {r}")).unwrap_or_default();
 
         Ok((
             runner_type,
@@ -226,18 +213,14 @@ impl DecisionEngine {
     ) -> (WindowsVersion, ResolutionDecision) {
         let (version, reason, source) =
             if let Some(ov) = db.and_then(|d| d.windows_version_override) {
-                (
-                    ov,
-                    "play-db specifies Windows version for this game.",
-                    DecisionSource::Database,
-                )
+                (ov, "play-db specifies Windows version for this game.", DecisionSource::Database)
             } else if dx_version == DirectXVersion::D3D9 {
                 // Some old D3D9 games reject Win10; Win7 has better compatibility.
                 (
-                    WindowsVersion::Win7,
-                    "D3D9 game detected; Windows 7 avoids compatibility rejections from old titles.",
-                    DecisionSource::Heuristic,
-                )
+                WindowsVersion::Win7,
+                "D3D9 game detected; Windows 7 avoids compatibility rejections from old titles.",
+                DecisionSource::Heuristic,
+            )
             } else {
                 (
                     WindowsVersion::Win10,
@@ -305,10 +288,9 @@ impl DecisionEngine {
                 WineAudioDriver::Pulse,
                 "PipeWire/PulseAudio detected; Wine Pulse driver provides lowest latency.",
             ),
-            AudioBackend::ALSA => (
-                WineAudioDriver::Alsa,
-                "ALSA-only system; Wine ALSA driver used.",
-            ),
+            AudioBackend::ALSA => {
+                (WineAudioDriver::Alsa, "ALSA-only system; Wine ALSA driver used.")
+            },
         };
         (
             driver,
@@ -328,14 +310,12 @@ impl DecisionEngine {
 
     pub fn select_prefix_arch(pe_arch: PeArchitecture) -> (WineArch, ResolutionDecision) {
         let (arch, reason) = match pe_arch {
-            PeArchitecture::X86 => (
-                WineArch::Win32,
-                "32-bit PE binary; Wine prefix must be Win32.",
-            ),
-            PeArchitecture::X86_64 => (
-                WineArch::Win64,
-                "64-bit PE binary; Win64 prefix for native 64-bit support.",
-            ),
+            PeArchitecture::X86 => {
+                (WineArch::Win32, "32-bit PE binary; Wine prefix must be Win32.")
+            },
+            PeArchitecture::X86_64 => {
+                (WineArch::Win64, "64-bit PE binary; Win64 prefix for native 64-bit support.")
+            },
         };
         (
             arch,
@@ -359,9 +339,8 @@ impl DecisionEngine {
         manifest: &RunnersManifest,
         runners_install_root: &std::path::Path,
     ) -> Result<RunnerAction, PlayError> {
-        let install_path = runners_install_root
-            .join(format!("{runner_type:?}"))
-            .join(version.to_string());
+        let install_path =
+            runners_install_root.join(format!("{runner_type:?}")).join(version.to_string());
         if install_path.exists() {
             Ok(RunnerAction::AlreadyInstalled { path: install_path })
         } else {
@@ -373,7 +352,7 @@ impl DecisionEngine {
                 Some(r) => Ok(RunnerAction::Download {
                     url: r.url.clone(),
                     version: version.clone(),
-                    sha256: r.sha256.clone(),
+                    sha512: r.sha512.clone(),
                 }),
                 None => Err(PlayError::NoRunnerAvailable {
                     runner_type: format!("{runner_type:?}"),
@@ -401,11 +380,7 @@ impl DecisionEngine {
             )
         } else {
             (
-                PrefixAction::Create {
-                    path: path.clone(),
-                    arch,
-                    windows_version,
-                },
+                PrefixAction::Create { path: path.clone(), arch, windows_version },
                 "No existing prefix; will create via wineboot during execution.",
             )
         };
@@ -431,10 +406,10 @@ impl DecisionEngine {
     /// Dev machine: 15657 + 6144 = 21801 MB → 8_388_608
     pub fn compute_vm_max_map_count(combined_mb: u64) -> u64 {
         match combined_mb {
-            0..=16_384 => 2_097_152,         // SteamOS baseline
-            16_385..=32_768 => 8_388_608,    // 4× baseline
-            32_769..=65_536 => 16_777_216,   // 8× baseline (Intel HX class)
-            _ => 2_147_483_642,              // MAX_INT-5, SteamOS max
+            0..=16_384 => 2_097_152,       // SteamOS baseline
+            16_385..=32_768 => 8_388_608,  // 4× baseline
+            32_769..=65_536 => 16_777_216, // 8× baseline (Intel HX class)
+            _ => 2_147_483_642,            // MAX_INT-5, SteamOS max
         }
     }
 
@@ -472,13 +447,10 @@ impl DecisionEngine {
         }
 
         // Check desktop-only (no laptops).
-        if constraint.requires_desktop
-            && (hw.gpu.is_laptop_gpu || hw.cpu.is_laptop_cpu)
-        {
+        if constraint.requires_desktop && (hw.gpu.is_laptop_gpu || hw.cpu.is_laptop_cpu) {
             return TweakDecision::NotApplicable {
-                reason:
-                    "Tweak is desktop-only; laptop detected — skipping to avoid thermal risk."
-                        .to_owned(),
+                reason: "Tweak is desktop-only; laptop detected — skipping to avoid thermal risk."
+                    .to_owned(),
             };
         }
 
@@ -531,23 +503,23 @@ impl DecisionEngine {
                 } else {
                     TweakDecision::Apply(SystemTweak::VmMaxMapCount { target })
                 }
-            }
+            },
             TweakId::ThpMadvise => TweakDecision::Apply(SystemTweak::ThpMadvise),
             TweakId::SchedAutogroup => {
                 // Spec §10: "Wine/Proton active: evaluate sched_autogroup → 0" (disable).
                 // Disabling isolates the game's scheduler group so desktop processes
                 // don't steal time slices from the game's cgroup.
                 TweakDecision::Apply(SystemTweak::SchedAutogroup { enabled: false })
-            }
+            },
             TweakId::SplitLockMitigate => {
                 TweakDecision::Apply(SystemTweak::SplitLockMitigate { enabled: false })
-            }
+            },
             TweakId::UlimitNofile => {
                 TweakDecision::Apply(SystemTweak::UlimitNofile { value: 524_288 })
-            }
+            },
             TweakId::CpuGovernorPerformance => {
                 TweakDecision::Apply(SystemTweak::CpuGovernorPerformance)
-            }
+            },
             TweakId::GameMode => TweakDecision::Apply(SystemTweak::GameMode),
             TweakId::DxvkAsync => {
                 // DxvkAsync is resolved separately (depends on anti-cheat, not hardware).
@@ -556,17 +528,15 @@ impl DecisionEngine {
                 TweakDecision::NotApplicable {
                     reason: "DxvkAsync resolved separately via configure_dxvk_async.".to_owned(),
                 }
-            }
+            },
             TweakId::Fsync => TweakDecision::Apply(SystemTweak::Fsync),
             TweakId::Esync => TweakDecision::Apply(SystemTweak::Esync),
             TweakId::NvidiaPersistenceMode => {
                 TweakDecision::Apply(SystemTweak::NvidiaPersistenceMode)
-            }
+            },
             TweakId::NvidiaClockLock => {
-                let mhz = hw
-                    .gpu
-                    .nvidia_vbios_max_clock_mhz
-                    .map_or(0, Self::compute_nvidia_lock_clock);
+                let mhz =
+                    hw.gpu.nvidia_vbios_max_clock_mhz.map_or(0, Self::compute_nvidia_lock_clock);
                 if mhz == 0 {
                     TweakDecision::NotApplicable {
                         reason:
@@ -579,7 +549,7 @@ impl DecisionEngine {
                         max_mhz: mhz,
                     })
                 }
-            }
+            },
         }
     }
 }
@@ -592,11 +562,7 @@ mod tests {
 
     fn make_kernel(major: u32, minor: u32, has_futex2: bool) -> KernelProfile {
         KernelProfile {
-            version: KernelVersion {
-                major,
-                minor,
-                patch: 0,
-            },
+            version: KernelVersion { major, minor, patch: 0 },
             has_futex2,
             has_fsync: has_futex2,
             vm_max_map_count: 65536,
@@ -637,11 +603,7 @@ mod tests {
                 supports_avx512: false,
                 is_laptop_cpu: is_laptop,
             },
-            memory: MemoryProfile {
-                total_mb: 15657,
-                available_mb: 10000,
-                swap_total_mb: 8192,
-            },
+            memory: MemoryProfile { total_mb: 15657, available_mb: 10000, swap_total_mb: 8192 },
             kernel: make_kernel(6, 18, true),
             display: DisplayProfile {
                 server: DisplayServer::Wayland,
@@ -660,25 +622,19 @@ mod tests {
 
     #[test]
     fn eac_linux_false_is_hard_block() {
-        let ac = vec![AntiCheat::EasyAntiCheat {
-            linux_supported: false,
-        }];
+        let ac = vec![AntiCheat::EasyAntiCheat { linux_supported: false }];
         assert!(DecisionEngine::check_hard_blocks(&ac).is_err());
     }
 
     #[test]
     fn battleye_linux_false_is_hard_block() {
-        let ac = vec![AntiCheat::BattlEye {
-            linux_supported: false,
-        }];
+        let ac = vec![AntiCheat::BattlEye { linux_supported: false }];
         assert!(DecisionEngine::check_hard_blocks(&ac).is_err());
     }
 
     #[test]
     fn eac_linux_true_is_not_hard_block() {
-        let ac = vec![AntiCheat::EasyAntiCheat {
-            linux_supported: true,
-        }];
+        let ac = vec![AntiCheat::EasyAntiCheat { linux_supported: true }];
         assert!(DecisionEngine::check_hard_blocks(&ac).is_ok());
     }
 
@@ -737,9 +693,7 @@ mod tests {
 
     #[test]
     fn eac_disables_async() {
-        let ac = vec![AntiCheat::EasyAntiCheat {
-            linux_supported: true,
-        }];
+        let ac = vec![AntiCheat::EasyAntiCheat { linux_supported: true }];
         let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac, None);
         assert!(!enabled);
     }
@@ -815,11 +769,7 @@ mod tests {
     fn nvidia_clock_lock_is_divisible_by_15() {
         for max in [1000u32, 1200, 1500, 1600, 1777, 1800, 2000, 2500] {
             let result = DecisionEngine::compute_nvidia_lock_clock(max);
-            assert_eq!(
-                result % 15,
-                0,
-                "clock lock {result} not divisible by 15 for max={max}"
-            );
+            assert_eq!(result % 15, 0, "clock lock {result} not divisible by 15 for max={max}");
         }
     }
 
@@ -859,10 +809,8 @@ mod tests {
     fn amd_gpu_skips_class_c() {
         let hw = make_hw(GpuVendor::AMD, false, None);
         for id in [TweakId::NvidiaClockLock, TweakId::NvidiaPersistenceMode] {
-            let constraint = super::super::tweak_registry::all()
-                .iter()
-                .find(|c| c.id == id)
-                .unwrap();
+            let constraint =
+                super::super::tweak_registry::all().iter().find(|c| c.id == id).unwrap();
             let decision = DecisionEngine::resolve_tweak(constraint, &hw, 65536);
             assert!(
                 matches!(decision, TweakDecision::NotApplicable { .. }),
@@ -875,10 +823,8 @@ mod tests {
     fn intel_gpu_skips_class_c() {
         let hw = make_hw(GpuVendor::Intel, false, None);
         for id in [TweakId::NvidiaClockLock, TweakId::NvidiaPersistenceMode] {
-            let constraint = super::super::tweak_registry::all()
-                .iter()
-                .find(|c| c.id == id)
-                .unwrap();
+            let constraint =
+                super::super::tweak_registry::all().iter().find(|c| c.id == id).unwrap();
             let decision = DecisionEngine::resolve_tweak(constraint, &hw, 65536);
             assert!(matches!(decision, TweakDecision::NotApplicable { .. }));
         }
@@ -904,10 +850,7 @@ mod tests {
             .find(|c| c.id == TweakId::VmMaxMapCount)
             .unwrap();
         let decision = DecisionEngine::resolve_tweak(constraint, &hw, 65536);
-        assert!(matches!(
-            decision,
-            TweakDecision::Apply(SystemTweak::VmMaxMapCount { .. })
-        ));
+        assert!(matches!(decision, TweakDecision::Apply(SystemTweak::VmMaxMapCount { .. })));
     }
 
     #[test]
@@ -921,10 +864,7 @@ mod tests {
         assert!(
             matches!(
                 decision,
-                TweakDecision::Apply(SystemTweak::NvidiaClockLock {
-                    min_mhz: 1680,
-                    max_mhz: 1680
-                })
+                TweakDecision::Apply(SystemTweak::NvidiaClockLock { min_mhz: 1680, max_mhz: 1680 })
             ),
             "unexpected decision: {decision:?}"
         );
@@ -962,23 +902,20 @@ mod tests {
 
     #[test]
     fn d3d9_without_db_selects_win7() {
-        let (version, dec) =
-            DecisionEngine::select_windows_version(None, DirectXVersion::D3D9);
+        let (version, dec) = DecisionEngine::select_windows_version(None, DirectXVersion::D3D9);
         assert_eq!(version, WindowsVersion::Win7);
         assert!(dec.reason.contains("D3D9"));
     }
 
     #[test]
     fn d3d11_without_db_selects_win10() {
-        let (version, _) =
-            DecisionEngine::select_windows_version(None, DirectXVersion::D3D11);
+        let (version, _) = DecisionEngine::select_windows_version(None, DirectXVersion::D3D11);
         assert_eq!(version, WindowsVersion::Win10);
     }
 
     #[test]
     fn d3d12_without_db_selects_win10() {
-        let (version, _) =
-            DecisionEngine::select_windows_version(None, DirectXVersion::D3D12);
+        let (version, _) = DecisionEngine::select_windows_version(None, DirectXVersion::D3D12);
         assert_eq!(version, WindowsVersion::Win10);
     }
 
@@ -1104,7 +1041,7 @@ mod tests {
                     runner_type,
                     version: Version::parse(v).unwrap(),
                     url: format!("https://example.com/{v}.tar.gz"),
-                    sha256: format!("sha256-{v}"),
+                    sha512: format!("sha512-{v}"),
                 })
                 .collect(),
         }
@@ -1128,10 +1065,7 @@ mod tests {
     fn select_runner_no_candidates_returns_no_runner_available() {
         // Manifest has only ProtonGE runners, but DB override asks for WineGE
         let manifest = make_manifest(RunnerType::ProtonGE, &["8.25.0", "8.26.0"]);
-        let db = DbEntry {
-            runner_type_override: Some(RunnerType::WineGE),
-            ..Default::default()
-        };
+        let db = DbEntry { runner_type_override: Some(RunnerType::WineGE), ..Default::default() };
         let identity = make_identity();
 
         let result = DecisionEngine::select_runner(&[], Some(&db), &manifest, &identity);

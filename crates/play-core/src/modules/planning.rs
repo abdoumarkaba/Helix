@@ -24,11 +24,7 @@ pub struct PlanningModule {
 
 impl PlanningModule {
     pub fn new(db_root: PathBuf, runners_install_root: PathBuf, prefix_root: PathBuf) -> Self {
-        Self {
-            db_root,
-            runners_install_root,
-            prefix_root,
-        }
+        Self { db_root, runners_install_root, prefix_root }
     }
 
     /// Plan execution for the given game environment.
@@ -44,12 +40,7 @@ impl PlanningModule {
         env: &GameEnvironment,
         db: &dyn DatabaseReader,
     ) -> Result<GamePlan, PlayError> {
-        PlanBuilder::new(
-            env,
-            db,
-            self.prefix_root.clone(),
-            self.runners_install_root.clone(),
-        )
-        .build()
+        PlanBuilder::new(env, db, self.prefix_root.clone(), self.runners_install_root.clone())
+            .build()
     }
 }
