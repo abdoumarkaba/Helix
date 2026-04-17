@@ -4,8 +4,8 @@
 //! DLL overrides. All operations are idempotent: if a prefix already exists,
 //! it is verified rather than recreated.
 
-use std::fs;
 use std::fmt::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

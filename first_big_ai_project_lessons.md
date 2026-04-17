@@ -7,5 +7,6 @@ organize build in specific steps
 wire format rules like clippy from the get-go so code is high quality
 set up ci cd actions and pre-commit hooks before initial commit
 wire remote before first commit
+connect proper mcp servers 
 
 

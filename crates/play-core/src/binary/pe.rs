@@ -145,33 +145,39 @@ mod tests {
     #[allow(clippy::similar_names)]
     fn build_minimal_pe32(import_dlls: &[&str]) -> Vec<u8> {
         let mut buf = build_dos_and_pe_headers();
-        let (section_rva, import_dir_rva_offset, import_dir_size_offset) = 
+        let (section_rva, import_dir_rva_offset, import_dir_size_offset) =
             add_section_header(&mut buf);
         let section_data_start = finalize_headers(&mut buf);
-        
+
         let section_data = build_import_section_data(import_dlls, section_rva);
         buf.extend_from_slice(&section_data);
-        
-        fixup_header_values(&mut buf, section_rva, section_data_start, 
-                          import_dir_rva_offset, import_dir_size_offset, 
-                          section_data.len(), import_dlls.len());
-        
+
+        fixup_header_values(
+            &mut buf,
+            section_rva,
+            section_data_start,
+            import_dir_rva_offset,
+            import_dir_size_offset,
+            section_data.len(),
+            import_dlls.len(),
+        );
+
         buf
     }
-    
+
     /// Build DOS header and PE/COFF headers.
     fn build_dos_and_pe_headers() -> Vec<u8> {
         let mut buf: Vec<u8> = Vec::new();
-        
+
         // --- DOS Header (64 bytes) ---
         buf.extend_from_slice(b"MZ");
         buf.resize(0x3C, 0);
         buf.extend_from_slice(&0x40_u32.to_le_bytes());
         buf.resize(0x40, 0);
-        
+
         // --- PE Signature ---
         buf.extend_from_slice(b"PE\0\0");
-        
+
         // --- COFF Header (20 bytes) ---
         buf.extend_from_slice(&0x014C_u16.to_le_bytes()); // Machine
         buf.extend_from_slice(&1_u16.to_le_bytes()); // NumberOfSections
@@ -182,7 +188,7 @@ mod tests {
         let optional_header_size: u16 = 96 + (num_data_dirs as u16) * 8;
         buf.extend_from_slice(&optional_header_size.to_le_bytes());
         buf.extend_from_slice(&0x0102_u16.to_le_bytes()); // Characteristics
-        
+
         // --- Optional Header (PE32) ---
         buf.extend_from_slice(&0x010B_u16.to_le_bytes()); // Magic
         buf.extend_from_slice(&[0u8; 2]); // MajorLinkerVersion, MinorLinkerVersion
@@ -213,16 +219,16 @@ mod tests {
         buf.extend_from_slice(&0x1000_u32.to_le_bytes()); // SizeOfHeapCommit
         buf.extend_from_slice(&0_u32.to_le_bytes()); // LoaderFlags
         buf.extend_from_slice(&2_u32.to_le_bytes()); // NumberOfRvaAndSizes
-        
+
         // --- Data Directories ---
         buf.extend_from_slice(&0_u32.to_le_bytes()); // Export Table RVA
         buf.extend_from_slice(&0_u32.to_le_bytes()); // Export Table Size
         buf.extend_from_slice(&0_u32.to_le_bytes()); // Import Table RVA (placeholder)
         buf.extend_from_slice(&0_u32.to_le_bytes()); // Import Table Size (placeholder)
-        
+
         buf
     }
-    
+
     /// Add section header and return important offsets.
     fn add_section_header(buf: &mut Vec<u8>) -> (u32, usize, usize) {
         // --- Section Header: .idata (40 bytes) ---
@@ -237,18 +243,18 @@ mod tests {
         buf.extend_from_slice(&0_u16.to_le_bytes()); // NumberOfRelocations
         buf.extend_from_slice(&0_u16.to_le_bytes()); // NumberOfLinenumbers
         buf.extend_from_slice(&0xC000_0040_u32.to_le_bytes()); // Characteristics
-        
+
         // Align to file alignment (0x200)
         let headers_end = buf.len();
         let aligned_headers = (headers_end + 0x1FF) & !0x1FF;
         buf.resize(aligned_headers, 0);
-        
+
         let import_dir_rva_offset = 0xC0; // Import Table RVA in optional header data directories
         let import_dir_size_offset = 0xC4; // Import Table Size in optional header data directories
-        
+
         (section_rva, import_dir_rva_offset, import_dir_size_offset)
     }
-    
+
     /// Finalize headers and return section data start position.
     fn finalize_headers(buf: &mut Vec<u8>) -> usize {
         let size_of_headers_offset = 0x94; // SizeOfHeaders in optional header
@@ -257,12 +263,12 @@ mod tests {
             .copy_from_slice(&size_of_headers.to_le_bytes());
         buf.len()
     }
-    
+
     /// Build the import section data.
     fn build_import_section_data(import_dlls: &[&str], section_rva: u32) -> Vec<u8> {
         let n = import_dlls.len();
         let idt_size = (n + 1) * 20;
-        
+
         // Build names blob
         let mut names_blob: Vec<u8> = Vec::new();
         for dll in import_dlls {
@@ -271,12 +277,12 @@ mod tests {
         }
         let names_size = names_blob.len();
         let import_lookup_table_size = n * 4;
-        
+
         // Calculate offsets
         let names_start = idt_size;
         let import_lookup_table_start = names_start + names_size;
         let import_address_table_start = import_lookup_table_start + import_lookup_table_size;
-        
+
         // Collect name RVAs
         let mut name_rvas: Vec<u32> = Vec::new();
         let mut offset = 0usize;
@@ -284,24 +290,27 @@ mod tests {
             name_rvas.push(section_rva + (names_start as u32) + (offset as u32));
             offset += dll.len() + 1;
         }
-        
+
         let mut section_data: Vec<u8> = Vec::new();
-        
+
         // Write IDT entries
         for (i, &name_rva) in name_rvas.iter().enumerate().take(n) {
-            let import_lookup_table_rva = section_rva + (import_lookup_table_start as u32) + (i as u32) * 4;
-            let import_address_table_rva = section_rva + (import_address_table_start as u32) + (i as u32) * 4;
+            let import_lookup_table_rva =
+                section_rva + (import_lookup_table_start as u32) + (i as u32) * 4;
+            let import_address_table_rva =
+                section_rva + (import_address_table_start as u32) + (i as u32) * 4;
             section_data.extend_from_slice(&import_lookup_table_rva.to_le_bytes());
             section_data.extend_from_slice(&0_u32.to_le_bytes()); // TimeDateStamp
             section_data.extend_from_slice(&0_u32.to_le_bytes()); // ForwarderChain
             section_data.extend_from_slice(&name_rva.to_le_bytes()); // Name RVA
-            section_data.extend_from_slice(&import_address_table_rva.to_le_bytes()); // FirstThunk
+            section_data.extend_from_slice(&import_address_table_rva.to_le_bytes());
+            // FirstThunk
         }
         section_data.extend_from_slice(&[0u8; 20]); // Null terminator
-        
+
         // Write DLL names
         section_data.extend_from_slice(&names_blob);
-        
+
         // Write ILT and IAT entries
         for _ in 0..n {
             section_data.extend_from_slice(&0_u32.to_le_bytes());
@@ -309,31 +318,35 @@ mod tests {
         for _ in 0..n {
             section_data.extend_from_slice(&0_u32.to_le_bytes());
         }
-        
+
         section_data
     }
-    
+
     /// Fix up header values with final section information.
-    fn fixup_header_values(buf: &mut Vec<u8>, section_rva: u32, section_data_start: usize, 
-                          import_dir_rva_offset: usize, import_dir_size_offset: usize, 
-                          section_data_len: usize, num_dlls: usize) {
+    fn fixup_header_values(
+        buf: &mut Vec<u8>,
+        section_rva: u32,
+        section_data_start: usize,
+        import_dir_rva_offset: usize,
+        import_dir_size_offset: usize,
+        section_data_len: usize,
+        num_dlls: usize,
+    ) {
         let size_of_image_offset = 0x90; // SizeOfImage in optional header
         let virtual_size_offset = 0xD0; // Section VirtualSize
         let raw_size_offset = 0xD8; // Section SizeOfRawData
         let raw_ptr_offset = 0xDC; // Section PointerToRawData
-        
+
         let section_raw_size = section_data_len as u32;
         let section_virtual_size = section_raw_size;
         let section_file_offset = section_data_start as u32;
-        
+
         // Fix up section header
         buf[virtual_size_offset..virtual_size_offset + 4]
             .copy_from_slice(&section_virtual_size.to_le_bytes());
-        buf[raw_size_offset..raw_size_offset + 4]
-            .copy_from_slice(&section_raw_size.to_le_bytes());
-        buf[raw_ptr_offset..raw_ptr_offset + 4]
-            .copy_from_slice(&section_file_offset.to_le_bytes());
-        
+        buf[raw_size_offset..raw_size_offset + 4].copy_from_slice(&section_raw_size.to_le_bytes());
+        buf[raw_ptr_offset..raw_ptr_offset + 4].copy_from_slice(&section_file_offset.to_le_bytes());
+
         // Fix up import directory
         buf[import_dir_rva_offset..import_dir_rva_offset + 4]
             .copy_from_slice(&section_rva.to_le_bytes());
@@ -342,7 +355,7 @@ mod tests {
         let import_dir_size = ((num_dlls + 1) * 20) as u32;
         buf[import_dir_size_offset..import_dir_size_offset + 4]
             .copy_from_slice(&import_dir_size.to_le_bytes());
-        
+
         // Fix up SizeOfImage
         let size_of_image = section_rva + ((section_virtual_size + 0xFFF) & !0xFFF);
         buf[size_of_image_offset..size_of_image_offset + 4]
