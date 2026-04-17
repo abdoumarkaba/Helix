@@ -1127,7 +1127,7 @@ mod tests {
     #[test]
     fn select_runner_no_candidates_returns_no_runner_available() {
         // Manifest has only ProtonGE runners, but DB override asks for WineGE
-        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25", "8.26"]);
+        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25.0", "8.26.0"]);
         let db = DbEntry {
             runner_type_override: Some(RunnerType::WineGE),
             ..Default::default()
@@ -1144,9 +1144,9 @@ mod tests {
     #[test]
     fn select_runner_version_floor_excludes_all() {
         // All runners below the floor
-        let manifest = make_manifest(RunnerType::ProtonGE, &["7.0", "7.1"]);
+        let manifest = make_manifest(RunnerType::ProtonGE, &["7.0.0", "7.1.0"]);
         let db = DbEntry {
-            runner_version_min: Some(Version::parse("8.0").unwrap()),
+            runner_version_min: Some(Version::parse("8.0.0").unwrap()),
             ..Default::default()
         };
         let identity = make_identity();
@@ -1172,8 +1172,8 @@ mod tests {
 
     #[test]
     fn resolve_runner_action_missing_from_manifest_returns_error() {
-        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25"]);
-        let version = Version::parse("9.99").unwrap();
+        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25.0"]);
+        let version = Version::parse("9.99.0").unwrap();
         let dir = tempfile::tempdir().unwrap();
 
         let result = DecisionEngine::resolve_runner_action(
@@ -1190,8 +1190,8 @@ mod tests {
 
     #[test]
     fn resolve_runner_action_wrong_type_returns_error() {
-        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25"]);
-        let version = Version::parse("8.25").unwrap();
+        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25.0"]);
+        let version = Version::parse("8.25.0").unwrap();
         let dir = tempfile::tempdir().unwrap();
 
         let result = DecisionEngine::resolve_runner_action(

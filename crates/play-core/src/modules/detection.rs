@@ -41,9 +41,14 @@ use crate::models::errors::PlayError;
 pub trait CommandRunner: Send + Sync {
     /// Run a command and return stdout.
     fn run_command(&self, program: &str, args: &[&str]) -> Result<String, String>;
+
+    /// Clone this runner into a new Box. Used by SystemModule to create
+    /// owned runners for Drop guards.
+    fn clone_boxed(&self) -> Box<dyn CommandRunner>;
 }
 
 /// Real command runner using `std::process::Command`.
+#[derive(Clone)]
 pub struct RealCommandRunner;
 
 impl CommandRunner for RealCommandRunner {
@@ -57,6 +62,10 @@ impl CommandRunner for RealCommandRunner {
             return Err(String::from_utf8_lossy(&output.stderr).to_string());
         }
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn clone_boxed(&self) -> Box<dyn CommandRunner> {
+        Box::new(self.clone())
     }
 }
 
@@ -781,6 +790,7 @@ pub fn detect_hardware(
 mod tests {
     use super::*;
 
+    #[derive(Clone)]
     struct MockCommandRunner {
         responses: HashMap<String, Result<String, String>>,
     }
@@ -791,6 +801,10 @@ mod tests {
                 .get(program)
                 .cloned()
                 .unwrap_or(Err("command not mocked".into()))
+        }
+
+        fn clone_boxed(&self) -> Box<dyn CommandRunner> {
+            Box::new(self.clone())
         }
     }
 

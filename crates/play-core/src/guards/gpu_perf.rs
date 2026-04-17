@@ -55,7 +55,7 @@ impl GpuPerfGuard {
     pub fn set_max(
         vendor: &GpuVendor,
         gpu: &GpuProfile,
-        cmd_runner: &dyn CommandRunner,
+        cmd_runner: Box<dyn CommandRunner>,
     ) -> Result<Self, PlayError> {
         match vendor {
             GpuVendor::NVIDIA => {
@@ -135,7 +135,7 @@ impl GpuPerfGuard {
                 Ok(Self::Nvidia {
                     prev_persistence,
                     clock_lock_mhz,
-                    cmd_runner: Box::from(crate::modules::detection::RealCommandRunner),
+                    cmd_runner,
                 })
             }
             GpuVendor::AMD => {
@@ -213,6 +213,7 @@ impl Drop for GpuPerfGuard {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     use crate::models::environment::{DriverType, GpuFeatureSet};
     use semver::Version;
@@ -221,10 +222,11 @@ mod tests {
     // Mock CommandRunner
     // -----------------------------------------------------------------------
 
+    #[derive(Clone)]
     struct MockCommandRunner {
-        responses: HashMap<String, Result<String, String>>,
+        responses: Arc<HashMap<String, Result<String, String>>>,
         /// Record of commands that were actually executed.
-        calls: std::sync::Mutex<Vec<(String, Vec<String>)>>,
+        calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
     }
 
     impl MockCommandRunner {
@@ -232,8 +234,8 @@ mod tests {
             responses: impl IntoIterator<Item = (String, Result<String, String>)>,
         ) -> Self {
             Self {
-                responses: responses.into_iter().collect(),
-                calls: std::sync::Mutex::new(Vec::new()),
+                responses: Arc::new(responses.into_iter().collect()),
+                calls: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -260,6 +262,10 @@ mod tests {
                 .get(&key)
                 .cloned()
                 .unwrap_or_else(|| Err(format!("unexpected command: {program} {:?}", args)))
+        }
+
+        fn clone_boxed(&self) -> Box<dyn CommandRunner> {
+            Box::new(self.clone())
         }
     }
 
@@ -336,7 +342,7 @@ mod tests {
         let gpu = nvidia_desktop_gpu();
         let runner = MockCommandRunner::new(nvidia_responses());
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, &runner).unwrap();
+        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
         assert!(guard.is_active());
 
         if let GpuPerfGuard::Nvidia {
@@ -377,7 +383,7 @@ mod tests {
         ];
         let runner = MockCommandRunner::new(responses);
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, &runner).unwrap();
+        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
         assert!(guard.is_active());
 
         if let GpuPerfGuard::Nvidia {
@@ -403,7 +409,7 @@ mod tests {
         let gpu = amd_gpu();
         let runner = MockCommandRunner::new(Vec::new());
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::AMD, &gpu, &runner).unwrap();
+        let guard = GpuPerfGuard::set_max(&GpuVendor::AMD, &gpu, Box::new(runner.clone())).unwrap();
         assert!(!guard.is_active());
         assert!(matches!(guard, GpuPerfGuard::Noop));
 
@@ -417,7 +423,7 @@ mod tests {
         gpu.vendor = GpuVendor::Intel;
         let runner = MockCommandRunner::new(Vec::new());
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::Intel, &gpu, &runner).unwrap();
+        let guard = GpuPerfGuard::set_max(&GpuVendor::Intel, &gpu, Box::new(runner.clone())).unwrap();
         assert!(!guard.is_active());
         assert!(matches!(guard, GpuPerfGuard::Noop));
     }
@@ -427,7 +433,7 @@ mod tests {
         let gpu = nvidia_desktop_gpu();
         let runner = MockCommandRunner::new(nvidia_responses());
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, &runner).unwrap();
+        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone())).unwrap();
 
         if let GpuPerfGuard::Nvidia {
             prev_persistence,
@@ -459,7 +465,7 @@ mod tests {
         let gpu = nvidia_desktop_gpu();
         let runner = MockCommandRunner::new(nvidia_responses());
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, &runner).unwrap();
+        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner)).unwrap();
 
         if let GpuPerfGuard::Nvidia { clock_lock_mhz, .. } = &guard {
             // Verify the value matches DecisionEngine::compute_nvidia_lock_clock
@@ -483,7 +489,7 @@ mod tests {
         ];
         let runner = MockCommandRunner::new(responses);
 
-        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, &runner).unwrap();
+        let guard = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner)).unwrap();
 
         if let GpuPerfGuard::Nvidia { clock_lock_mhz, .. } = &guard {
             assert_eq!(*clock_lock_mhz, None);
@@ -500,7 +506,7 @@ mod tests {
         ];
         let runner = MockCommandRunner::new(responses);
 
-        let result = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, &runner);
+        let result = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner));
         assert!(result.is_err());
     }
 
@@ -516,7 +522,7 @@ mod tests {
         ];
         let runner = MockCommandRunner::new(responses);
 
-        let result = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, &runner);
+        let result = GpuPerfGuard::set_max(&GpuVendor::NVIDIA, &gpu, Box::new(runner.clone()));
         assert!(result.is_err());
 
         // Verify persistence was restored (4th call = -pm 0)

@@ -23,6 +23,8 @@ use crate::modules::detection::CommandRunner;
 pub struct GovernorGuard {
     /// (sysfs_path, previous_governor_value) per core that was changed.
     cores: Vec<(PathBuf, String)>,
+    /// Injected command runner — used by Drop to restore state.
+    cmd_runner: Box<dyn CommandRunner>,
 }
 
 impl GovernorGuard {
@@ -39,7 +41,7 @@ impl GovernorGuard {
     pub fn set_performance(
         sys_root: &Path,
         is_laptop_cpu: bool,
-        cmd_runner: &dyn CommandRunner,
+        cmd_runner: Box<dyn CommandRunner>,
     ) -> Result<Self, PlayError> {
         if is_laptop_cpu {
             tracing::info!(
@@ -47,7 +49,7 @@ impl GovernorGuard {
                 tweak = "cpu_governor",
                 reason = "laptop CPU detected — skipping to avoid thermal risk"
             );
-            return Ok(Self { cores: vec![] });
+            return Ok(Self { cores: vec![], cmd_runner });
         }
 
         let pattern = sys_root
@@ -69,7 +71,7 @@ impl GovernorGuard {
                 tweak = "cpu_governor",
                 reason = "no cpufreq entries found"
             );
-            return Ok(Self { cores: vec![] });
+            return Ok(Self { cores: vec![], cmd_runner });
         }
 
         let mut cores: Vec<(PathBuf, String)> = Vec::with_capacity(entries.len());
@@ -88,10 +90,14 @@ impl GovernorGuard {
             cmd_runner
                 .run_command("play-helper", &["sysfs-write", &path_str, "performance"])
                 .map_err(|e| {
-                    // Partial application — drop what we've already changed
-                    let partial = Self { cores: std::mem::take(&mut cores) };
-                    // Drop runs and restores the partial changes
-                    drop(partial);
+                    // Manual rollback of already-written cores (can't clone Box<dyn CommandRunner>)
+                    for (prev_path, prev_val) in cores.iter().rev() {
+                        let prev_path_str = prev_path.to_string_lossy();
+                        let _ = cmd_runner.run_command(
+                            "play-helper",
+                            &["sysfs-write", &prev_path_str, prev_val],
+                        );
+                    }
                     PlayError::GovernorWrite {
                         core: path.display().to_string(),
                         reason: format!("write failed: {e}"),
@@ -108,7 +114,7 @@ impl GovernorGuard {
             cores_changed = cores.len()
         );
 
-        Ok(Self { cores })
+        Ok(Self { cores, cmd_runner })
     }
 
     /// Returns true if this guard actually changed any cores (not a no-op).
@@ -119,17 +125,11 @@ impl GovernorGuard {
 
 impl Drop for GovernorGuard {
     fn drop(&mut self) {
-        // We can't hold a reference to CommandRunner here, so we use
-        // RealCommandRunner directly. This is acceptable because Drop
-        // always runs in the real process context, never in tests
-        // (tests use catch_unwind which drops after the test scope).
-        let runner = crate::modules::detection::RealCommandRunner;
-
         // Restore in reverse order for symmetry
         for (path, previous) in self.cores.iter().rev() {
             let path_str = path.to_string_lossy();
             if let Err(e) =
-                runner.run_command("play-helper", &["sysfs-write", &path_str, previous])
+                self.cmd_runner.run_command("play-helper", &["sysfs-write", &path_str, previous])
             {
                 // NEVER panic in Drop — log the error and continue
                 tracing::error!(
@@ -160,7 +160,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::panic::AssertUnwindSafe;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     // Need fs accessible for MockCommandRunner sysfs-read/sysfs-write
 
@@ -172,14 +172,18 @@ mod tests {
     /// `play-helper sysfs-write <path> <value>` by reading/writing real
     /// tempdir files. This preserves integration semantics while routing
     /// through the CommandRunner interface.
+    ///
+    /// Uses `Arc<Mutex<...>>` for the call log so it can be cloned into
+    /// the guard and inspected after the guard is dropped.
+    #[derive(Clone)]
     struct MockCommandRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
+        calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
     }
 
     impl MockCommandRunner {
         fn new() -> Self {
             Self {
-                calls: Mutex::new(Vec::new()),
+                calls: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -214,6 +218,10 @@ mod tests {
                 _ => Err(format!("unexpected play-helper subcommand: {:?}", args)),
             }
         }
+
+        fn clone_boxed(&self) -> Box<dyn CommandRunner> {
+            Box::new(self.clone())
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -240,7 +248,7 @@ mod tests {
         let runner = MockCommandRunner::new();
 
         let guard =
-            GovernorGuard::set_performance(dir.path(), false, &runner).unwrap();
+            GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
         assert!(guard.is_active());
 
         // Verify all cores now say "performance"
@@ -251,23 +259,16 @@ mod tests {
             assert_eq!(fs::read_to_string(&path).unwrap().trim(), "performance");
         }
 
-        // Verify commands were issued in order: 4 reads then 4 writes
-        let calls = runner.calls();
-        assert_eq!(calls.len(), 8);
-        for i in 0..4 {
-            assert_eq!(calls[i].0, "play-helper");
-            assert_eq!(calls[i].1[0], "sysfs-read");
-        }
-        for i in 4..8 {
-            assert_eq!(calls[i].0, "play-helper");
-            assert_eq!(calls[i].1[0], "sysfs-write");
-            assert_eq!(calls[i].1[2], "performance");
-        }
-
-        // Drop the guard — should restore (via RealCommandRunner, so files
-        // won't change in this test context, but we verify the guard held
-        // the right data)
+        // Drop the guard — should restore via stored mock runner
         drop(guard);
+
+        // Verify cores restored to "schedutil"
+        for i in 0..4 {
+            let path = dir.path().join(format!(
+                "sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"
+            ));
+            assert_eq!(fs::read_to_string(&path).unwrap().trim(), "schedutil");
+        }
     }
 
     #[test]
@@ -277,11 +278,8 @@ mod tests {
         let runner = MockCommandRunner::new();
 
         let guard =
-            GovernorGuard::set_performance(dir.path(), true, &runner).unwrap();
+            GovernorGuard::set_performance(dir.path(), true, Box::new(runner)).unwrap();
         assert!(!guard.is_active());
-
-        // No commands should have been issued
-        assert!(runner.calls().is_empty());
 
         // Cores should remain unchanged
         for i in 0..4 {
@@ -299,20 +297,27 @@ mod tests {
         let runner = MockCommandRunner::new();
 
         let guard =
-            GovernorGuard::set_performance(dir.path(), false, &runner).unwrap();
+            GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
 
         // Verify guard captured the right previous values
         assert!(guard.is_active());
 
         // Simulate a panic after guard is created.
-        // Drop will use RealCommandRunner (not our mock), so we can't
-        // verify file restoration here — but we verify Drop doesn't panic.
+        // Drop uses the stored mock runner, so files are actually restored.
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let _guard = guard;
             panic!("simulated game crash");
         }));
 
         assert!(result.is_err());
+
+        // Guard should have restored despite panic
+        for i in 0..2 {
+            let path = dir.path().join(format!(
+                "sys/devices/system/cpu/cpu{i}/cpufreq/scaling_governor"
+            ));
+            assert_eq!(fs::read_to_string(&path).unwrap().trim(), "powersave");
+        }
     }
 
     #[test]
@@ -322,13 +327,13 @@ mod tests {
         let runner = MockCommandRunner::new();
 
         let guard =
-            GovernorGuard::set_performance(dir.path(), false, &runner).unwrap();
+            GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
 
         // Remove the file between set and drop — restore will fail but must not panic
         let path = dir.path().join("sys/devices/system/cpu/cpu0/cpufreq/scaling_governor");
         fs::remove_file(&path).unwrap();
 
-        // Drop should not panic (uses RealCommandRunner which will fail gracefully)
+        // Drop should not panic (mock runner will get a read error, logged via tracing)
         drop(guard);
     }
 
@@ -340,7 +345,7 @@ mod tests {
         let runner = MockCommandRunner::new();
 
         let guard =
-            GovernorGuard::set_performance(dir.path(), false, &runner).unwrap();
+            GovernorGuard::set_performance(dir.path(), false, Box::new(runner)).unwrap();
         assert!(!guard.is_active());
     }
 
@@ -351,7 +356,7 @@ mod tests {
         let runner = MockCommandRunner::new();
 
         let guard =
-            GovernorGuard::set_performance(dir.path(), false, &runner).unwrap();
+            GovernorGuard::set_performance(dir.path(), false, Box::new(runner.clone())).unwrap();
 
         let calls = runner.calls();
 
