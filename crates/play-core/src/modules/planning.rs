@@ -10,12 +10,14 @@ use crate::models::environment::GameEnvironment;
 use crate::models::errors::PlayError;
 use crate::models::plan::GamePlan;
 
-use super::database_client::{DatabaseClient, DatabaseReader};
+use super::database_client::{DatabaseReader, NoopDatabaseReader};
 use super::plan_builder::PlanBuilder;
+use crate::models::plan::RunnersManifest;
 
 pub struct PlanningModule {
     /// Root of the local play-db cache (e.g. ~/.local/share/play/db).
-    db_root: PathBuf,
+    /// NOTE: Disabled for local testing, uses empty manifest
+    _db_root: PathBuf,
     /// Root directory where runner binaries are installed.
     runners_install_root: PathBuf,
     /// Root directory for Wine prefixes (e.g. ~/.local/share/play/prefixes).
@@ -24,13 +26,15 @@ pub struct PlanningModule {
 
 impl PlanningModule {
     pub fn new(db_root: PathBuf, runners_install_root: PathBuf, prefix_root: PathBuf) -> Self {
-        Self { db_root, runners_install_root, prefix_root }
+        Self { _db_root: db_root, runners_install_root, prefix_root }
     }
 
     /// Plan execution for the given game environment.
-    /// Returns a GamePlan with `hard_blocks` populated if planning fails.
+    /// NOTE: Uses empty runners manifest for local testing (play-db disabled)
     pub fn plan(&self, env: &GameEnvironment) -> Result<GamePlan, PlayError> {
-        let db = DatabaseClient::new(self.db_root.clone());
+        // Use empty manifest for local testing
+        let empty_manifest = RunnersManifest { runners: vec![] };
+        let db = NoopDatabaseReader::with_manifest(empty_manifest);
         self.plan_with_reader(env, &db)
     }
 

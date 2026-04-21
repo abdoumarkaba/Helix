@@ -472,21 +472,10 @@ impl Orchestrator {
         self.report_progress("Planning configuration...");
         info!(event = "phase_start", phase = "planning", "Starting planning phase");
 
-        // Pre-flight: Check for database and auto-fetch if missing
-        let runners_toml = self.db_root.join("runners.toml");
-        if !runners_toml.exists() {
-            warn!(
-                event = "db_missing",
-                path = %runners_toml.display(),
-                "runners.toml not found, attempting auto-fetch"
-            );
-            self.report_progress("Fetching play-db for first use...");
-            if let Err(e) = self.fetch_database() {
-                error!(event = "db_auto_fetch_failed", error = %e, "Failed to auto-fetch play-db");
-                return Err(PlayError::RunnersManifestMissing { path: runners_toml });
-            }
-            info!(event = "db_auto_fetch_success", "Auto-fetched play-db successfully");
-        }
+        // NOTE: play-db disabled for local testing
+        // TODO: Re-enable when play-db is ready
+        // let runners_toml = self.db_root.join("runners.toml");
+        // if !runners_toml.exists() { ... }
 
         let env = self.env.as_ref().ok_or_else(|| PlayError::OrchestratorFailed {
             phase: "planning".to_string(),
@@ -509,91 +498,12 @@ impl Orchestrator {
         Ok(())
     }
 
+    /// NOTE: Disabled for local testing
     /// Fetch the play-db database from GitHub.
-    /// Called automatically on first run when runners.toml is missing.
+    #[allow(dead_code)]
     fn fetch_database(&self) -> Result<(), PlayError> {
-        use std::process::Command;
-
-        // Create db directory if it doesn't exist
-        std::fs::create_dir_all(&self.db_root).map_err(|e| PlayError::OrchestratorFailed {
-            phase: "fetch_database".to_string(),
-            reason: format!("failed to create db directory: {e}"),
-        })?;
-
-        // Check if git is available
-        let git_check = Command::new("git").arg("--version").output();
-        if git_check.is_err() {
-            return Err(PlayError::OrchestratorFailed {
-                phase: "fetch_database".to_string(),
-                reason: "git not found in PATH. Install git to auto-fetch play-db.".to_string(),
-            });
-        }
-
-        let db_url = "https://github.com/abdoumarkaba/play-db.git";
-        let clone_path = self.db_root.join(".git").exists();
-
-        let result = if clone_path {
-            // Already cloned, just fetch
-            Command::new("git")
-                .args(["-C", &self.db_root.to_string_lossy(), "pull", "origin", "main"])
-                .output()
-        } else {
-            // Fresh clone
-            Command::new("git")
-                .args(["clone", "--depth", "1", db_url, &self.db_root.to_string_lossy()])
-                .output()
-        };
-
-        match result {
-            Ok(output) if output.status.success() => {
-                // Verify runners.toml was actually created
-                let runners_toml = self.db_root.join("runners.toml");
-                if !runners_toml.exists() {
-                    // Check if it's nested in a subdirectory (common repo structure)
-                    let nested = self.db_root.join("db").join("runners.toml");
-                    if nested.exists() {
-                        // Move files up to expected location
-                        info!(event = "db_nested_structure", "Moving nested db files to root");
-                        let nested_db = self.db_root.join("db");
-                        for entry in std::fs::read_dir(&nested_db).map_err(|e| PlayError::OrchestratorFailed {
-                            phase: "fetch_database".to_string(),
-                            reason: format!("failed to read nested db dir: {e}"),
-                        })? {
-                            let entry = entry.map_err(|e| PlayError::OrchestratorFailed {
-                                phase: "fetch_database".to_string(),
-                                reason: format!("failed to read dir entry: {e}"),
-                            })?;
-                            let src = entry.path();
-                            let dst = self.db_root.join(entry.file_name());
-                            if let Err(e) = std::fs::rename(&src, &dst) {
-                                warn!(event = "db_move_failed", src = %src.display(), dst = %dst.display(), error = %e);
-                            }
-                        }
-                    } else {
-                        return Err(PlayError::OrchestratorFailed {
-                            phase: "fetch_database".to_string(),
-                            reason: format!(
-                                "git clone succeeded but runners.toml not found at {} or {}",
-                                runners_toml.display(),
-                                nested.display()
-                            ),
-                        });
-                    }
-                }
-                Ok(())
-            }
-            Ok(output) => Err(PlayError::OrchestratorFailed {
-                phase: "fetch_database".to_string(),
-                reason: format!(
-                    "git command failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ),
-            }),
-            Err(e) => Err(PlayError::OrchestratorFailed {
-                phase: "fetch_database".to_string(),
-                reason: format!("failed to execute git: {e}"),
-            }),
-        }
+        // TODO: Re-enable when play-db is ready
+        Ok(())
     }
 
     /// Confirmation phase: display plan and get user approval.

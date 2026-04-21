@@ -6,7 +6,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use chrono::Local;
 use chrono::Utc;
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
@@ -15,6 +14,7 @@ use console::{style, Term};
 use dirs::data_dir;
 use indicatif::{ProgressBar, ProgressStyle};
 use tracing::{error, info, warn};
+use tracing_subscriber::prelude::*;
 
 use play_core::models::environment::GameEnvironment;
 use play_core::models::errors::PlayError;
@@ -87,7 +87,7 @@ fn get_log_dir() -> PathBuf {
         .join("logs")
 }
 
-fn setup_tracing(verbose: bool) -> PathBuf {
+fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
     let log_dir = get_log_dir();
 
     // Create log directory if it doesn't exist
@@ -95,35 +95,45 @@ fn setup_tracing(verbose: bool) -> PathBuf {
         eprintln!("Warning: Failed to create log directory: {}", e);
     }
 
-    // Set up file appender for daily rotating logs with naming: play.YYYY-MM-DD
-    // tracing_appender format: {prefix}.{date} → play.2026-04-21
+    // Generate per-run log filename: play-{timestamp}-{game_name}.log
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let game_name = exe_path
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+    let log_filename = format!("play-{}-{}.log", timestamp, game_name);
+    let log_path = log_dir.join(&log_filename);
+
+    // Create single file appender (non-rotating) for this run
     let file_appender = tracing_appender::rolling::RollingFileAppender::new(
-        tracing_appender::rolling::Rotation::DAILY,
+        tracing_appender::rolling::Rotation::NEVER,
         &log_dir,
-        "play",
+        format!("play-{}-{}", timestamp, game_name),
     );
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     // Keep the guard alive for the duration of the program
-    // Note: In production, we'd want to store this in a static or pass it around
-    // For now, we leak it to keep logging working for the program lifetime
     Box::leak(Box::new(_guard));
 
-    let filter = if verbose {
-        "play_core=debug,play_cli=debug,info"
-    } else {
-        "play_core=info,play_cli=info,warn"
-    };
+    // Always verbose for now - show everything to console
+    let filter = "play_core=debug,play_cli=debug,info";
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(non_blocking)
-        .with_ansi(false)
-        .with_target(false)
-        .with_thread_ids(false)
+    // Set up console output in addition to file
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_ansi(true)
+        .with_target(false);
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false).with_target(false))
+        .with(console_layer)
+        .with(tracing_subscriber::EnvFilter::new(filter))
         .init();
 
-    log_dir
+    // Print the log file path at startup so user knows where to find it
+    eprintln!("{} {}", style("Log file:").dim(), log_path.display());
+
+    log_path
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +144,7 @@ fn setup_tracing(verbose: bool) -> PathBuf {
 fn display_error_with_context(
     error: &PlayError,
     exe_path: &Path,
-    log_dir: &Path,
+    _log_dir: &Path,
     rollback_entries: &[play_core::orchestrator::RollbackEntry],
 ) {
     eprintln!("\n  {} {}", style("Error:").red().bold(), error);
@@ -245,10 +255,13 @@ fn display_error_with_context(
         },
     }
 
-    // Show log file location
-    // tracing_appender produces: play.2026-04-21 (no extension, period separator)
-    let log_file = log_dir.join(format!("play.{}", Local::now().format("%Y-%m-%d")));
-    eprintln!("\n  {} {}", style("Log file:").dim(), log_file.display());
+    // Log file path was already printed at startup
+}
+
+/// Show log file location at end of run
+#[allow(dead_code)]
+fn show_log_path(_log_path: &Path) {
+    // Log path is now shown at startup, but keep this for potential future use
 }
 
 // ---------------------------------------------------------------------------
@@ -445,9 +458,7 @@ fn create_orchestrator(
 fn main() {
     let args = CliArgs::parse();
 
-    let log_dir = setup_tracing(args.verbose);
-
-    // Handle utility commands that don't need an exe_path
+    // Handle utility commands that don't need an exe_path (before setting up tracing)
     if args.log_path {
         let log_dir = get_log_dir();
         println!("{}", log_dir.display());
@@ -478,17 +489,7 @@ fn main() {
         return;
     }
 
-    // Handle --update-db after logging is set up
-    if args.update_db {
-        if let Err(e) = update_db() {
-            error!(event = "update_db_failed", error = %e, "Failed to update play-db");
-            eprintln!("{} {}", style("Error:").red().bold(), e);
-            std::process::exit(1);
-        }
-        return;
-    }
-
-    // Validate exe_path for remaining commands
+    // Validate exe_path for remaining commands (needed for log filename)
     let exe_path = match args.exe_path {
         Some(path) => path,
         None => {
@@ -501,6 +502,19 @@ fn main() {
             std::process::exit(1);
         },
     };
+
+    // Now setup tracing with exe_path for per-run log file naming
+    let log_dir = setup_tracing(args.verbose, Some(&exe_path));
+
+    // Handle --update-db after logging is set up
+    if args.update_db {
+        if let Err(e) = update_db() {
+            error!(event = "update_db_failed", error = %e, "Failed to update play-db");
+            eprintln!("{} {}", style("Error:").red().bold(), e);
+            std::process::exit(1);
+        }
+        return;
+    }
 
     // Validate executable exists
     if !exe_path.exists() {
@@ -673,6 +687,7 @@ fn main() {
 
             // Display error with full context including rollback info
             display_error_with_context(&e, &exe_path, &log_dir, orchestrator.rollback_manifest());
+            let _ = log_dir; // Suppress unused warning, log path shown at startup
 
             std::process::exit(1);
         },

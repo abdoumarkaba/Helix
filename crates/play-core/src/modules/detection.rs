@@ -465,10 +465,65 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
     })
 }
 
-/// Detect GPU with fallback chain: lspci → vulkaninfo → glxinfo → safe defaults.
+/// Detect NVIDIA GPU from nvidia-smi (most reliable on NVIDIA systems).
+/// Returns None if nvidia-smi is not available or no NVIDIA GPU found.
+pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
+    // Query GPU name, VRAM, and driver version
+    let output = cmd_runner
+        .run_command("nvidia-smi", &["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"])
+        .ok()?;
+
+    let parts: Vec<&str> = output.trim().split(',').collect();
+    if parts.len() >= 3 {
+        let name = parts[0].trim().to_string();
+        let vram_str = parts[1].trim();
+        let driver_str = parts[2].trim();
+
+        // Parse VRAM (format: "4096 MiB")
+        let vram_mb = vram_str
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse::<u32>().ok())
+            .map(|v| v / 1024) // Convert MiB to GiB roughly, or keep as MiB
+            .unwrap_or(0);
+
+        // Parse driver version
+        let driver_version = Version::parse(driver_str).unwrap_or_else(|_| Version::new(0, 0, 0));
+
+        info!(vendor = "NVIDIA", model = %name, vram_mb, driver = %driver_str, method = "nvidia-smi", "gpu detection");
+
+        return Some(GpuProfile {
+            vendor: GpuVendor::NVIDIA,
+            model: name,
+            vram_mb,
+            driver_version,
+            vulkan_version: None,
+            driver_type: DriverType::NvidiaProprietary,
+            features: GpuFeatureSet {
+                vulkan_1_2: true,  // Assume modern NVIDIA has VK 1.2
+                vulkan_1_3: true,  // And 1.3
+                ray_tracing: true, // NVIDIA RTX cards support RT
+                mesh_shaders: true,
+                resizable_bar: false, // Would need to check
+                dx12_feature_level: None,
+            },
+            is_laptop_gpu: false, // TODO: Detect from name
+            nvidia_vbios_max_clock_mhz: None, // Would need extra query
+        });
+    }
+
+    None
+}
+
+/// Detect GPU with fallback chain: nvidia-smi → lspci → vulkaninfo → safe defaults.
 /// Never fails - returns Unknown GPU with safe defaults if all methods fail.
 pub fn detect_gpu_with_fallbacks(cmd_runner: &dyn CommandRunner) -> GpuProfile {
-    // Try lspci first (best method)
+    // Try nvidia-smi first (most reliable for NVIDIA)
+    if let Some(gpu) = detect_gpu_nvidia_smi(cmd_runner) {
+        return gpu;
+    }
+
+    // Try lspci second (best for all vendors if available)
     if let Some(gpu) = detect_gpu_lspci(cmd_runner) {
         return gpu;
     }
