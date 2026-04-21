@@ -65,6 +65,10 @@ struct CliArgs {
     /// Show log file location
     #[arg(long)]
     log_path: bool,
+
+    /// Ignore checkpoint and start fresh session
+    #[arg(long)]
+    force_fresh: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -531,25 +535,39 @@ fn main() {
         style("Analyzing game...").dim()
     ));
 
+    // Create orchestrator
     let cmd_runner = Box::new(RealCommandRunner);
     let mut orchestrator = create_orchestrator(cmd_runner);
 
-    // Check for checkpoint recovery
-    match orchestrator.recover() {
-        Ok(true) => {
-            warn!(event = "recovered_from_checkpoint", phase = ?orchestrator.phase(), "Resuming from previous session");
-            let _ = term.write_line(&format!(
-                "  {} Recovered previous session (phase: {:?})\n",
-                style("⚠").yellow(),
-                orchestrator.phase()
-            ));
-        },
-        Ok(false) => {
-            info!(event = "fresh_start", "Starting fresh session");
-        },
-        Err(e) => {
-            warn!(event = "recovery_failed", error = %e, "Failed to recover checkpoint");
-        },
+    // Check for checkpoint recovery (unless --force-fresh is set)
+    if !args.force_fresh {
+        match orchestrator.recover() {
+            Ok(true) => {
+                let phase = orchestrator.phase();
+                if phase.can_resume() {
+                    warn!(event = "recovered_from_checkpoint", phase = ?phase, "Resuming from previous session");
+                    let _ = term.write_line(&format!(
+                        "  {} Resuming from previous session (phase: {:?})\n",
+                        style("Info:").cyan(),
+                        phase
+                    ));
+                } else {
+                    let _ = term.write_line(&format!(
+                        "  {} Previous session found but cannot resume (phase: {:?})\n",
+                        style("Warning:").yellow(),
+                        phase
+                    ));
+                }
+            },
+            Ok(false) => {
+                info!(event = "fresh_start", "Starting fresh session");
+            },
+            Err(e) => {
+                warn!(event = "recovery_failed", error = %e, "Failed to recover checkpoint");
+            },
+        }
+    } else {
+        info!(event = "force_fresh", "Starting fresh session (--force-fresh)");
     }
 
     // Run orchestrator lifecycle with progress indicator
@@ -577,11 +595,22 @@ fn main() {
             let phase = orchestrator.phase();
 
             if phase == OrchestratorPhase::Validated {
-                println!(
-                    "\n  {} {}",
-                    style("✓").green().bold(),
-                    style("Game session completed successfully").green()
-                );
+                if let Some(pid) = orchestrator.running_game_pid() {
+                    println!(
+                        "\n  {} Game launched successfully (PID: {})",
+                        style("Game launched successfully").green().bold(),
+                        pid
+                    );
+                    println!(
+                        "  {}",
+                        style("Press Ctrl+C to stop monitoring (game continues in background)").dim()
+                    );
+                } else {
+                    println!(
+                        "\n  {} Game session completed successfully",
+                        style("Game session completed successfully").green().bold()
+                    );
+                }
 
                 // Write metrics on successful completion
                 if let Some(env) = orchestrator.env() {

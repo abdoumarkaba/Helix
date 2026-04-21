@@ -84,6 +84,11 @@ impl OrchestratorPhase {
             Self::Confirmed | Self::Executed | Self::Validated | Self::Failed | Self::RollingBack
         )
     }
+
+    /// Returns true if session can be resumed from this phase.
+    pub fn can_resume(&self) -> bool {
+        matches!(self, Self::Confirmed | Self::Executed)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +191,11 @@ impl Orchestrator {
     /// Get the current rollback manifest (for error display).
     pub fn rollback_manifest(&self) -> &[RollbackEntry] {
         &self.rollback_manifest
+    }
+
+    /// Get the PID of the running game process (if any).
+    pub fn running_game_pid(&self) -> Option<u32> {
+        self.running_game.as_ref().map(|c| c.id())
     }
 
     /// Set progress callback for phase updates.

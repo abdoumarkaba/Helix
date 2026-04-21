@@ -4,10 +4,14 @@
 //! to `Command::spawn()` to prevent injection when paths contain spaces.
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
 use crate::models::environment::RunnerType;
 use crate::models::errors::PlayError;
 use crate::models::plan::LaunchAction;
+
+/// Seconds to wait for game process to stabilize after launch.
+const LAUNCH_STABILIZE_SECS: u64 = 12;
 
 /// Module responsible for spawning the game process.
 pub struct LaunchModule;
@@ -97,10 +101,31 @@ impl LaunchModule {
             .stderr(Stdio::piped());
 
         // Spawn the process
-        let child = cmd.spawn().map_err(|e| PlayError::GameLaunchFailed {
+        let mut child = cmd.spawn().map_err(|e| PlayError::GameLaunchFailed {
             exe_path: exe_path.clone(),
             reason: format!("failed to spawn process: {e}"),
         })?;
+
+        // Wait for process to stabilize
+        std::thread::sleep(Duration::from_secs(LAUNCH_STABILIZE_SECS));
+
+        // Check if process is still running
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Process exited during stabilization period
+                return Err(PlayError::GameLaunchFailed {
+                    exe_path: exe_path.clone(),
+                    reason: format!("game exited during launch (code: {:?})", status.code()),
+                });
+            },
+            Ok(None) => {
+                // Process still running - launch verified
+                tracing::info!(pid = child.id(), "Game launched successfully and stabilized");
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to check process status during verification");
+            },
+        }
 
         Ok(child)
     }
