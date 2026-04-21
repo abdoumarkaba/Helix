@@ -866,6 +866,7 @@ dependencies = [
  "dirs",
  "indicatif",
  "play-core",
+ "serde_json",
  "tempfile",
  "toml",
  "tracing",

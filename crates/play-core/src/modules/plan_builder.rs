@@ -10,8 +10,8 @@ use crate::models::environment::{
 };
 use crate::models::errors::PlayError;
 use crate::models::plan::{
-    DbEntry, GamePlan, PlanWarning, PlannedTweak, RequiredPackage, RunnersManifest, TweakDecision,
-    TweakId,
+    DbEntry, GamePlan, LaunchAction, PlanWarning, PlannedTweak, RequiredPackage, RunnersManifest,
+    TweakDecision, TweakId,
 };
 
 use super::database_client::DatabaseReader;
@@ -178,6 +178,22 @@ impl<'a> PlanBuilder<'a> {
                 };
         }
 
+        // --- 13. Build launch action ---
+        let exe_path = env.identity.exe_path.clone();
+        let working_dir = exe_path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+
+        env.launch.exe_path = exe_path.clone();
+        env.launch.working_dir = working_dir.clone();
+
+        let launch_action = LaunchAction::Spawn {
+            exe_path,
+            working_dir,
+            args: Vec::new(), // TODO: Allow CLI args
+            env: env.launch.env.clone(),
+            runner_path: env.runner.install_path.clone(),
+            runner_type: env.runner.runner_type,
+        };
+
         Ok(GamePlan {
             env,
             warnings,
@@ -185,6 +201,7 @@ impl<'a> PlanBuilder<'a> {
             required_packages,
             runner_action,
             prefix_action,
+            launch_action,
             tweaks,
             db_hit,
         })
@@ -310,7 +327,10 @@ impl<'a> PlanBuilder<'a> {
     }
 
     fn early_fail_plan(self, hard_blocks: Vec<String>, db_hit: bool) -> GamePlan {
-        use crate::models::plan::{PrefixAction, RunnerAction};
+        use crate::models::plan::{LaunchAction, PrefixAction, RunnerAction};
+        let exe_path = self.env.identity.exe_path.clone();
+        let working_dir = exe_path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+
         GamePlan {
             env: self.env.clone(),
             warnings: Vec::new(),
@@ -318,6 +338,14 @@ impl<'a> PlanBuilder<'a> {
             required_packages: Vec::new(),
             runner_action: RunnerAction::AlreadyInstalled { path: PathBuf::new() },
             prefix_action: PrefixAction::AlreadyExists { path: PathBuf::new() },
+            launch_action: LaunchAction::Spawn {
+                exe_path,
+                working_dir,
+                args: Vec::new(),
+                env: self.env.launch.env.clone(),
+                runner_path: PathBuf::new(),
+                runner_type: self.env.runner.runner_type,
+            },
             tweaks: Vec::new(),
             db_hit,
         }

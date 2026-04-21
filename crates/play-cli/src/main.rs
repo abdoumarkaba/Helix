@@ -8,6 +8,7 @@ use std::process::Command;
 
 use chrono::Utc;
 use clap::Parser;
+use serde_json::Value as JsonValue;
 use console::{style, Term};
 use dirs::data_dir;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -296,16 +297,22 @@ fn write_metrics(
 // ---------------------------------------------------------------------------
 
 fn undo_game(exe_path: &Path) -> Result<(), PlayError> {
-    let state_root = get_state_root(exe_path);
+    // Scan for checkpoint matching this exe_path
+    let games_root = data_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+        .join("play")
+        .join("games");
 
-    if !state_root.exists() {
+    let matching_checkpoint = find_checkpoint_by_exe_path(&games_root, exe_path)?;
+
+    let Some((_state_root, _checkpoint)) = matching_checkpoint else {
         return Err(PlayError::ValidationFailed {
             reason: format!("No previous session found for {}", exe_path.display()),
         });
-    }
+    };
 
     let cmd_runner = Box::new(RealCommandRunner);
-    let mut orchestrator = create_orchestrator(exe_path, cmd_runner);
+    let mut orchestrator = create_orchestrator(cmd_runner);
 
     // Try to recover from checkpoint
     match orchestrator.recover() {
@@ -320,17 +327,45 @@ fn undo_game(exe_path: &Path) -> Result<(), PlayError> {
     }
 }
 
+/// Scan games directory for a checkpoint matching the given exe_path.
+fn find_checkpoint_by_exe_path(
+    games_root: &Path,
+    exe_path: &Path,
+) -> Result<Option<(PathBuf, JsonValue)>, PlayError> {
+    if !games_root.exists() {
+        return Ok(None);
+    }
+
+    let entries = std::fs::read_dir(games_root).map_err(|e| PlayError::ValidationFailed {
+        reason: format!("Failed to read games directory: {e}"),
+    })?;
+
+    for entry in entries.flatten() {
+        let state_root = entry.path();
+        let checkpoint_path = state_root.join("checkpoint.json");
+
+        if checkpoint_path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&checkpoint_path) {
+                if let Ok(json) = serde_json::from_str::<JsonValue>(&contents) {
+                    let stored_path = json
+                        .get("env")
+                        .and_then(|e| e.get("identity"))
+                        .and_then(|i| i.get("exe_path"))
+                        .and_then(|p| p.as_str());
+                    if stored_path == Some(exe_path.to_string_lossy().as_ref()) {
+                        return Ok(Some((state_root, json)));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn get_state_root(exe_path: &Path) -> PathBuf {
-    data_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-        .join("play")
-        .join("games")
-        .join(compute_exe_hash_prefix(exe_path))
-}
 
 fn get_runners_root() -> PathBuf {
     data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("runners")
@@ -344,25 +379,15 @@ fn get_db_root() -> PathBuf {
     data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("db")
 }
 
-fn compute_exe_hash_prefix(exe_path: &Path) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    exe_path.to_string_lossy().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
-
 fn create_orchestrator(
-    exe_path: &Path,
     cmd_runner: Box<dyn play_core::modules::detection::CommandRunner>,
 ) -> Orchestrator {
-    let state_root =
+    // Pass the games root directly - orchestrator will create temp dir then rename to SHA256
+    let games_root =
         data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games");
 
     Orchestrator::new(
-        exe_path,
-        state_root,
+        games_root,
         get_runners_root(),
         get_prefix_root(),
         get_db_root(),
@@ -424,7 +449,19 @@ fn main() {
 
     // Handle report command
     if args.report {
-        let state_root = get_state_root(&exe_path);
+        let games_root = data_dir()
+            .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+            .join("play")
+            .join("games");
+
+        let matching = find_checkpoint_by_exe_path(&games_root, &exe_path)
+            .unwrap_or(None);
+
+        let Some((state_root, _)) = matching else {
+            eprintln!("{} No previous session found for this game", style("Error:").red().bold());
+            std::process::exit(1);
+        };
+
         let report_dir = state_root.join("reports");
 
         if !report_dir.exists() {
@@ -446,7 +483,7 @@ fn main() {
     ));
 
     let cmd_runner = Box::new(RealCommandRunner);
-    let mut orchestrator = create_orchestrator(&exe_path, cmd_runner);
+    let mut orchestrator = create_orchestrator(cmd_runner);
 
     // Check for checkpoint recovery
     match orchestrator.recover() {
@@ -484,15 +521,21 @@ fn main() {
                 if let Some(env) = orchestrator.env() {
                     // In a full implementation, we'd get actual duration and FPS from execution
                     // For now, write placeholder metrics
-                    if let Err(e) = write_metrics(
-                        &get_state_root(&exe_path),
-                        env,
-                        0, // Would come from actual session timing
-                        Some(0),
-                        false,
-                        None, // Would come from ValidationModule
-                    ) {
-                        warn!(event = "metrics_write_failed", error = %e, "Failed to write metrics");
+                    let games_root = data_dir()
+                        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+                        .join("play")
+                        .join("games");
+                    if let Ok(Some((state_root, _))) = find_checkpoint_by_exe_path(&games_root, &exe_path) {
+                        if let Err(e) = write_metrics(
+                            &state_root,
+                            env,
+                            0, // Would come from actual session timing
+                            Some(0),
+                            false,
+                            None, // Would come from ValidationModule
+                        ) {
+                            warn!(event = "metrics_write_failed", error = %e, "Failed to write metrics");
+                        }
                     }
                 }
             } else if phase == OrchestratorPhase::Planned {
@@ -543,13 +586,11 @@ mod tests {
         let parsed = CliArgs::parse_from(args);
         assert_eq!(parsed.exe_path, Some(PathBuf::from("/path/to/game.exe")));
         assert!(!parsed.yes);
-        assert!(!parsed.dry_run);
 
         // Test with flags
-        let args = vec!["play", "--yes", "--dry-run", "game.exe"];
+        let args = vec!["play", "--yes", "game.exe"];
         let parsed = CliArgs::parse_from(args);
         assert!(parsed.yes);
-        assert!(parsed.dry_run);
 
         // Test utility flags without exe_path
         let args = vec!["play", "--update-db"];
@@ -558,29 +599,4 @@ mod tests {
         assert!(parsed.exe_path.is_none());
     }
 
-    #[test]
-    fn test_compute_exe_hash_prefix() {
-        let path1 = PathBuf::from("/games/game1.exe");
-        let path2 = PathBuf::from("/games/game2.exe");
-
-        let hash1 = compute_exe_hash_prefix(&path1);
-        let hash2 = compute_exe_hash_prefix(&path2);
-        let hash1_again = compute_exe_hash_prefix(&path1);
-
-        // Same path produces same hash
-        assert_eq!(hash1, hash1_again);
-        // Different paths produce different hashes
-        assert_ne!(hash1, hash2);
-        // Hash is 16 hex chars (64-bit)
-        assert_eq!(hash1.len(), 16);
-    }
-
-    #[test]
-    fn test_get_state_root() {
-        let exe = PathBuf::from("/some/path/game.exe");
-        let root = get_state_root(&exe);
-
-        // Should end with hash-like directory
-        assert!(root.to_string_lossy().contains("play/games/"));
-    }
 }

@@ -24,6 +24,7 @@ fn base_env(dx: DirectXVersion, pe_arch: PeArchitecture) -> GameEnvironment {
     GameEnvironment {
         identity: GameIdentity {
             exe_hash: "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+            exe_path: std::path::PathBuf::from("/test/test_game.exe"),
             exe_name: "test_game.exe".to_owned(),
             steam_app_id: None,
             detected_name: None,

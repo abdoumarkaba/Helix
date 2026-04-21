@@ -152,7 +152,9 @@ pub struct Orchestrator {
     proc_root: PathBuf,
     sys_root: PathBuf,
     etc_root: PathBuf,
-    /// State directory: ~/.local/share/play/games/{exe_hash}/
+    /// State directory parent: ~/.local/share/play/games/
+    state_root_parent: PathBuf,
+    /// Current state directory (starts as temp, renamed after detection)
     state_root: PathBuf,
     /// Runner installation directory.
     runners_root: PathBuf,
@@ -174,34 +176,35 @@ pub struct Orchestrator {
     cmd_runner: Box<dyn CommandRunner>,
     /// User confirmation callback (returns true to proceed).
     confirm_callback: Option<ConfirmCallback>,
+    /// Handle to the spawned game process (set during execution phase).
+    running_game: Option<std::process::Child>,
 }
 
 impl Orchestrator {
     /// Create a new orchestrator for the given executable.
     ///
     /// # Arguments
-    /// - `exe_path`: Path to the game executable.
-    /// - `state_root`: Directory for checkpoints (~/.local/share/play/games/{hash}).
+    /// - `state_root`: Directory for checkpoints (~/.local/share/play/games/). Temp dir created inside.
     /// - `runners_root`: Directory for installed runners.
     /// - `prefix_root`: Directory for Wine prefixes.
     /// - `db_root`: Directory for play-db cache.
     /// - `cmd_runner`: Injectable command runner for testability.
     pub fn new(
-        exe_path: &Path,
         state_root: PathBuf,
         runners_root: PathBuf,
         prefix_root: PathBuf,
         db_root: PathBuf,
         cmd_runner: Box<dyn CommandRunner>,
     ) -> Self {
-        // Compute exe_hash for state directory name
-        let exe_hash = compute_exe_hash_prefix(exe_path);
-        let game_state_root = state_root.join(exe_hash);
+        // Use a temporary state directory name until detection gives us the real SHA256
+        let temp_id = temp_state_id();
+        let game_state_root = state_root.join(&temp_id);
 
         Self {
             proc_root: PathBuf::from("/proc"),
             sys_root: PathBuf::from("/sys"),
             etc_root: PathBuf::from("/etc"),
+            state_root_parent: state_root,
             state_root: game_state_root,
             runners_root,
             prefix_root,
@@ -213,6 +216,7 @@ impl Orchestrator {
             rollback_manifest: Vec::new(),
             cmd_runner,
             confirm_callback: None,
+            running_game: None,
         }
     }
 
@@ -231,6 +235,7 @@ impl Orchestrator {
             proc_root,
             sys_root,
             etc_root,
+            state_root_parent: state_root.clone(),
             state_root,
             runners_root,
             prefix_root,
@@ -242,6 +247,7 @@ impl Orchestrator {
             rollback_manifest: Vec::new(),
             cmd_runner,
             confirm_callback: None,
+            running_game: None,
         }
     }
 
@@ -305,6 +311,9 @@ impl Orchestrator {
         if self.phase == OrchestratorPhase::Failed {
             return self.final_error();
         }
+
+        // After detection, rename state directory to use real SHA256
+        self.rename_state_to_hash()?;
 
         // Phase 2: Planning
         self.plan_phase()?;
@@ -514,12 +523,22 @@ impl Orchestrator {
 
         let guards = system_module.apply(&plan.tweaks, &env.hardware)?;
 
-        // Record rollback entries for Class B/C tweaks
-        // Clone tweaks to avoid borrow conflict with plan reference
+        // Clone plan data before mutable borrows
         let tweaks_clone = plan.tweaks.clone();
-        self.record_rollback_entries(&tweaks_clone);
+        let launch_action = plan.launch_action.clone();
 
         self.guards = Some(guards);
+
+        // Record rollback entries for Class B/C tweaks
+        self.record_rollback_entries(&tweaks_clone);
+
+        // Launch the game
+        let launch_module = crate::execution::launch::LaunchModule::new();
+        let child = launch_module.execute(&launch_action)?;
+        self.running_game = Some(child);
+
+        info!(event = "game_spawned", "Game process spawned successfully");
+
         self.phase = OrchestratorPhase::Executed;
         self.write_checkpoint()?;
 
@@ -640,6 +659,56 @@ impl Orchestrator {
             path: path.clone(),
             reason: format!("failed to parse checkpoint: {e}"),
         })
+    }
+
+    // -----------------------------------------------------------------------
+    // State Directory Management
+    // -----------------------------------------------------------------------
+
+    /// After detection, rename state directory from temp name to real SHA256 hash.
+    fn rename_state_to_hash(&mut self) -> Result<(), PlayError> {
+        let env = self.env.as_ref().ok_or_else(|| PlayError::OrchestratorFailed {
+            phase: "rename_state".to_string(),
+            reason: "no environment after detection".to_string(),
+        })?;
+
+        let real_hash = &env.identity.exe_hash;
+        let new_state_root = self.state_root_parent.join(real_hash);
+
+        // If already at correct path, nothing to do
+        if self.state_root == new_state_root {
+            return Ok(());
+        }
+
+        // If target already exists, remove the temp directory (we'll use existing)
+        if new_state_root.exists() {
+            fs::remove_dir_all(&self.state_root).map_err(|e| PlayError::CheckpointFailed {
+                path: self.state_root.clone(),
+                reason: format!("failed to remove temp state dir: {e}"),
+            })?;
+            self.state_root = new_state_root;
+            return Ok(());
+        }
+
+        // Rename temp directory to final hash-based name
+        fs::rename(&self.state_root, &new_state_root).map_err(|e| PlayError::CheckpointFailed {
+            path: self.state_root.clone(),
+            reason: format!(
+                "failed to rename state dir to {}: {e}",
+                new_state_root.display()
+            ),
+        })?;
+
+        self.state_root = new_state_root;
+
+        info!(
+            event = "state_dir_renamed",
+            hash = %real_hash,
+            path = %self.state_root.display(),
+            "State directory renamed to SHA256 hash"
+        );
+
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -872,9 +941,12 @@ impl Orchestrator {
             nvidia_clock_lock_mhz: None,
         };
 
+        let exe_path = identity.exe_path.clone();
+        let working_dir = exe_path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+
         let launch = LaunchConfig {
-            exe_path: PathBuf::new(),
-            working_dir: PathBuf::new(),
+            exe_path,
+            working_dir,
             args: Vec::new(),
             env: indexmap::IndexMap::new(),
             pre_launch: Vec::new(),
@@ -1009,16 +1081,14 @@ impl Drop for Orchestrator {
 // Helper Functions
 // ---------------------------------------------------------------------------
 
-/// Compute a short hash prefix for the state directory name.
-fn compute_exe_hash_prefix(exe_path: &Path) -> String {
-    // For now, use the filename + a simple hash
-    // In production, this would be the actual SHA256
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    exe_path.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+/// Generate a temporary state directory name for use before detection completes.
+fn temp_state_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("pending-{now:024x}")
 }
 
 // ---------------------------------------------------------------------------
