@@ -1050,6 +1050,7 @@ mod tests {
     fn make_identity() -> GameIdentity {
         GameIdentity {
             exe_hash: "ab".repeat(32),
+            exe_path: std::path::PathBuf::from("/test/test.exe"),
             exe_name: "test.exe".to_owned(),
             steam_app_id: None,
             detected_name: None,

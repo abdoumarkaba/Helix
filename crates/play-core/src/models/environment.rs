@@ -34,6 +34,8 @@ pub struct GameEnvironment {
 pub struct GameIdentity {
     /// SHA256, primary key everywhere
     pub exe_hash: String,
+    /// Full path to the game executable
+    pub exe_path: PathBuf,
     pub exe_name: String,
     pub steam_app_id: Option<u32>,
     pub detected_name: Option<String>,
@@ -441,6 +443,16 @@ pub struct LaunchConfig {
 pub struct HookCommand {
     pub program: String,
     pub args: Vec<String>,
+}
+
+/// Fully resolved command to launch a game.
+/// Never contains shell strings — only explicit arguments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchCommand {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub env: IndexMap<String, String>,
+    pub working_dir: PathBuf,
 }
 
 // ---------------------------------------------------------------------------

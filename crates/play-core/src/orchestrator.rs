@@ -395,6 +395,7 @@ impl Orchestrator {
         // Build GameIdentity
         let identity = GameIdentity {
             exe_hash: binary.hash.clone(),
+            exe_path: exe_path.to_path_buf(),
             exe_name: exe_path
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -1070,6 +1071,7 @@ mod tests {
             env: crate::models::environment::GameEnvironment {
                 identity: crate::models::environment::GameIdentity {
                     exe_hash: "abc123".to_string(),
+                    exe_path: std::path::PathBuf::from("/test/test.exe"),
                     exe_name: "test.exe".to_string(),
                     steam_app_id: None,
                     detected_name: None,

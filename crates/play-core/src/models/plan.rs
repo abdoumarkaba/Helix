@@ -28,6 +28,8 @@ pub struct GamePlan {
     pub runner_action: RunnerAction,
     /// What will happen with the Wine prefix.
     pub prefix_action: PrefixAction,
+    /// What will happen to launch the game.
+    pub launch_action: LaunchAction,
     /// Every tweak decision, including NotApplicable entries (for audit trail).
     pub tweaks: Vec<PlannedTweak>,
     /// Whether a play-db entry was found and used for this game.
@@ -179,6 +181,24 @@ pub enum PrefixAction {
     AlreadyExists { path: PathBuf },
     /// Will be created via wineboot during execution.
     Create { path: PathBuf, arch: WineArch, windows_version: WindowsVersion },
+}
+
+// ---------------------------------------------------------------------------
+// LaunchAction
+// ---------------------------------------------------------------------------
+
+/// What will happen to launch the game.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LaunchAction {
+    /// Will spawn the game process via the resolved runner.
+    Spawn {
+        exe_path: PathBuf,
+        working_dir: PathBuf,
+        args: Vec<String>,
+        env: IndexMap<String, String>,
+        runner_path: PathBuf,
+        runner_type: RunnerType,
+    },
 }
 
 // ---------------------------------------------------------------------------

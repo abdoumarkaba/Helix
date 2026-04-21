@@ -4,7 +4,6 @@
 //! DLL overrides. All operations are idempotent: if a prefix already exists,
 //! it is verified rather than recreated.
 
-use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,6 +24,22 @@ pub trait CommandRunner: Send + Sync {
     /// # Errors
     /// Returns `PlayError::PrefixCreation` if the command fails to spawn or exits with non-zero status.
     fn run(&self, cmd: &str, args: &[&str]) -> Result<String, PlayError>;
+
+    /// Run a command with environment variables and arguments.
+    ///
+    /// # Arguments
+    /// * `cmd` - The command to execute
+    /// * `args` - Arguments to pass to the command
+    /// * `env_vars` - Environment variables as (key, value) pairs
+    ///
+    /// # Errors
+    /// Returns `PlayError::PrefixCreation` if the command fails to spawn or exits with non-zero status.
+    fn run_with_env(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        env_vars: &[(&str, &str)],
+    ) -> Result<String, PlayError>;
 }
 
 /// System command runner that spawns real processes.
@@ -37,6 +52,34 @@ impl CommandRunner for SystemCommandRunner {
                 prefix_path: PathBuf::new(),
                 reason: format!("failed to spawn {cmd}: {e}"),
             })?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(PlayError::PrefixCreation {
+                prefix_path: PathBuf::new(),
+                reason: format!("{cmd} failed: {stderr}"),
+            })
+        }
+    }
+
+    fn run_with_env(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        env_vars: &[(&str, &str)],
+    ) -> Result<String, PlayError> {
+        let mut command = Command::new(cmd);
+        command.args(args);
+        for (key, value) in env_vars {
+            command.env(key, value);
+        }
+
+        let output = command.output().map_err(|e| PlayError::PrefixCreation {
+            prefix_path: PathBuf::new(),
+            reason: format!("failed to spawn {cmd}: {e}"),
+        })?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -278,28 +321,6 @@ impl PrefixModule {
         args: &[&str],
         extra_env: &[(&str, &str)],
     ) -> Result<String, PlayError> {
-        // Build environment string
-        let mut env_str = format!("WINEPREFIX={}", prefix_path.display());
-        for (key, value) in extra_env {
-            write!(env_str, " {key}={value}").unwrap();
-        }
-
-        // Use env to set WINEPREFIX and run the command
-        let mut full_args = vec!["env"];
-        full_args.push(&env_str);
-        full_args.extend(args.iter().copied());
-
-        // The first arg after 'env' is the command, rest are args
-        // We need to handle this differently - env takes KEY=VALUE pairs
-        let mut cmd_args: Vec<String> = Vec::new();
-        cmd_args.push(format!("WINEPREFIX={}", prefix_path.display()));
-        for (key, value) in extra_env {
-            cmd_args.push(format!("{key}={value}"));
-        }
-
-        let env_args: Vec<&str> = cmd_args.iter().map(String::as_str).collect();
-
-        // Determine the actual wine command (first non-env arg)
         if args.is_empty() {
             return Err(PlayError::PrefixCreation {
                 prefix_path: prefix_path.to_owned(),
@@ -310,22 +331,24 @@ impl PrefixModule {
         let wine_cmd = args[0];
         let wine_args = &args[1..];
 
-        // Build full command: env WINEPREFIX=... WINEARCH=... wineboot --init
-        let mut full_cmd = vec!["env"];
-        full_cmd.extend(env_args);
-        full_cmd.push(wine_cmd);
-        full_cmd.extend(wine_args);
+        // Build environment variables list
+        let prefix_path_str = prefix_path.to_str().ok_or_else(|| PlayError::PrefixCreation {
+            prefix_path: prefix_path.to_owned(),
+            reason: "prefix path contains invalid UTF-8 characters".to_owned(),
+        })?;
 
-        // Run via shell for env command
-        let cmd_str = full_cmd.join(" ");
-        let output = self.cmd_runner.run("sh", &["-c", &cmd_str]).map_err(|e| {
+        let mut env_vars: Vec<(&str, &str)> = vec![("WINEPREFIX", prefix_path_str)];
+        for (key, value) in extra_env {
+            env_vars.push((key, value));
+        }
+
+        // Run via command runner with environment variables
+        self.cmd_runner.run_with_env(wine_cmd, wine_args, &env_vars).map_err(|e| {
             PlayError::PrefixCreation {
                 prefix_path: prefix_path.to_owned(),
                 reason: format!("wine command failed: {e}"),
             }
-        })?;
-
-        Ok(output)
+        })
     }
 }
 
@@ -361,6 +384,34 @@ mod tests {
     impl CommandRunner for MockCommandRunner {
         fn run(&self, cmd: &str, args: &[&str]) -> Result<String, PlayError> {
             let full_cmd = format!("{cmd} {}", args.join(" "));
+            self.calls.lock().unwrap().push(full_cmd.clone());
+
+            match self.responses.get(&full_cmd) {
+                Some(Ok(output)) => Ok(output.clone()),
+                Some(Err(e)) => Err(PlayError::PrefixCreation {
+                    prefix_path: PathBuf::new(),
+                    reason: e.clone(),
+                }),
+                None => {
+                    // Default success for unregistered commands
+                    Ok(String::new())
+                },
+            }
+        }
+
+        fn run_with_env(
+            &self,
+            cmd: &str,
+            args: &[&str],
+            env_vars: &[(&str, &str)],
+        ) -> Result<String, PlayError> {
+            // Build a command string that includes env vars for matching
+            let env_str = env_vars
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let full_cmd = format!("{env_str} {cmd} {}", args.join(" "));
             self.calls.lock().unwrap().push(full_cmd.clone());
 
             match self.responses.get(&full_cmd) {
@@ -424,9 +475,14 @@ mod tests {
         let root = temp_prefix_root();
         let prefix_path = root.path().join("abc123");
 
+        // Build expected command strings (format: "WINEPREFIX=... WINEARCH=... winecmd args")
+        let prefix_str = prefix_path.to_str().unwrap();
+        let wineboot_cmd = format!("WINEPREFIX={prefix_str} WINEARCH=win64 wineboot --init");
+        let winecfg_cmd = format!("WINEPREFIX={prefix_str} winecfg /v win10");
+
         let mock = MockCommandRunner::new()
-            .add_response("sh -c env WINEPREFIX= win64 wineboot --init", Ok(String::new()))
-            .add_response("sh -c env WINEPREFIX= winecfg /v win10", Ok(String::new()));
+            .add_response(&wineboot_cmd, Ok(String::new()))
+            .add_response(&winecfg_cmd, Ok(String::new()));
 
         // Pre-create the prefix structure so verify passes
         let module = PrefixModule::with_runner(Box::new(mock));

@@ -103,4 +103,7 @@ pub enum PlayError {
 
     #[error("Database update failed: {reason}")]
     DatabaseUpdateFailed { reason: String },
+
+    #[error("Failed to launch game at {exe_path}: {reason}")]
+    GameLaunchFailed { exe_path: PathBuf, reason: String },
 }
