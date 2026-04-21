@@ -25,6 +25,55 @@ const MAX_RETRIES: u8 = 3;
 /// Buffer size for streaming downloads (64 KiB).
 const DOWNLOAD_BUF_SIZE: usize = 65536;
 
+/// Estimated download size for Proton-GE (1.2GB) + 20% buffer.
+const ESTIMATED_DOWNLOAD_SIZE: u64 = 1_500_000_000;
+
+/// Check available disk space before download using df command.
+fn check_disk_space(path: &Path) -> Result<u64, PlayError> {
+    use std::process::Command;
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| PlayError::RunnerDownload {
+                url: String::new(),
+                attempt: 1,
+                reason: format!("Failed to create directory: {e}"),
+            })?;
+        }
+    }
+
+    // Use df to get available space
+    let output = Command::new("df")
+        .args(["-B1", "--output=avail", path.display().to_string().as_str()])
+        .output()
+        .map_err(|e| PlayError::RunnerDownload {
+            url: String::new(),
+            attempt: 1,
+            reason: format!("Failed to check disk space: {e}"),
+        })?;
+
+    let available: u64 = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .nth(1)
+        .and_then(|l| l.trim().parse().ok())
+        .unwrap_or(0);
+
+    if available < ESTIMATED_DOWNLOAD_SIZE {
+        return Err(PlayError::RunnerDownload {
+            url: String::new(),
+            attempt: 1,
+            reason: format!(
+                "Insufficient disk space. Required: ~1.5GB, Available: {}MB. Location: {}",
+                available / 1_000_000,
+                path.display()
+            ),
+        });
+    }
+
+    Ok(available)
+}
+
 // ---------------------------------------------------------------------------
 // RunnerModule
 // ---------------------------------------------------------------------------
@@ -90,6 +139,9 @@ impl RunnerModule {
                 })?;
 
                 let archive_path = download_dir.join(&archive_name);
+
+                // Check disk space before download
+                check_disk_space(&self.runners_install_root)?;
 
                 // Download with retries
                 self.download_with_retries(url, &archive_path)?;

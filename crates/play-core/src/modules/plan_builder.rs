@@ -274,6 +274,31 @@ impl<'a> PlanBuilder<'a> {
             });
         }
 
+        // Check NVIDIA driver version - warn if outdated
+        use crate::models::environment::{DriverType, GpuVendor};
+        if self.env.hardware.gpu.vendor == GpuVendor::NVIDIA
+            && self.env.hardware.gpu.driver_type == DriverType::NvidiaProprietary
+        {
+            let min_driver = semver::Version::new(535, 0, 0);
+            if self.env.hardware.gpu.driver_version < min_driver {
+                let distro = &self.env.hardware.distro.distro;
+                let install_cmd = match distro {
+                    crate::models::environment::Distro::Ubuntu |
+                    crate::models::environment::Distro::Debian => "sudo apt install nvidia-driver-535",
+                    crate::models::environment::Distro::Fedora => "sudo dnf install akmod-nvidia",
+                    crate::models::environment::Distro::Arch => "sudo pacman -S nvidia",
+                    _ => "Update your NVIDIA driver",
+                };
+                warnings.push(PlanWarning {
+                    message: format!(
+                        "NVIDIA driver {} may be outdated. Recommended: 535+ for modern games.",
+                        self.env.hardware.gpu.driver_version
+                    ),
+                    install_hint: Some(install_cmd.to_owned()),
+                });
+            }
+        }
+
         tweaks
     }
 
@@ -291,24 +316,9 @@ impl<'a> PlanBuilder<'a> {
             already_installed: false, // ExecutionModule will verify
         });
 
-        // Layer-specific.
-        match layer {
-            TranslationLayer::Dxvk => {
-                pkgs.push(RequiredPackage {
-                    name: "dxvk".to_owned(),
-                    reason: "D3D8/9/10/11-to-Vulkan translation layer.".to_owned(),
-                    already_installed: false,
-                });
-            },
-            TranslationLayer::Vkd3dProton => {
-                pkgs.push(RequiredPackage {
-                    name: "vkd3d-proton".to_owned(),
-                    reason: "D3D12-to-Vulkan translation layer.".to_owned(),
-                    already_installed: false,
-                });
-            },
-            _ => {},
-        }
+        // DXVK and VKD3D-Proton are bundled in Proton-GE, no separate installation needed.
+        // The translation layer selection still affects runner configuration.
+        let _ = layer;
 
         pkgs
     }

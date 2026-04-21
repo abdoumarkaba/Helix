@@ -1075,7 +1075,37 @@ impl Orchestrator {
             "Installing required packages"
         );
 
-        pm.install(&to_install)
+        pm.install(&to_install)?;
+
+        // Verify Vulkan after installation (warning only, not blocking)
+        self.verify_vulkan()?;
+
+        Ok(())
+    }
+
+    /// Verify Vulkan is working after package installation.
+    fn verify_vulkan(&self) -> Result<(), PlayError> {
+        use std::process::Command;
+
+        let output = Command::new("vulkaninfo")
+            .arg("--summary")
+            .output();
+
+        match output {
+            Ok(out) if out.status.success() => {
+                info!(event = "vulkan_verified", "Vulkan verification passed");
+            },
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                warn!(event = "vulkan_warning", error = %stderr, "Vulkan verification returned non-zero");
+            },
+            Err(e) => {
+                warn!(event = "vulkan_warning", error = %e, "Vulkan verification failed - vulkaninfo not available");
+            },
+        }
+
+        // Vulkan verification is non-blocking - just a warning
+        Ok(())
     }
 
     /// Return the final error after failure.
