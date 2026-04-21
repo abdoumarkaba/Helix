@@ -8,7 +8,8 @@ use std::process::Command;
 
 use chrono::Local;
 use chrono::Utc;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 use serde_json::Value as JsonValue;
 use console::{style, Term};
 use dirs::data_dir;
@@ -69,6 +70,10 @@ struct CliArgs {
     /// Ignore checkpoint and start fresh session
     #[arg(long)]
     force_fresh: bool,
+
+    /// Generate shell completions (bash, zsh, fish)
+    #[arg(long, value_name = "SHELL")]
+    generate_completion: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +447,23 @@ fn main() {
 
     // Handle utility commands that don't need an exe_path
     if args.log_path {
+        let log_dir = get_log_dir();
         println!("{}", log_dir.display());
+        return;
+    }
+
+    if let Some(shell_name) = args.generate_completion {
+        let shell = match shell_name.as_str() {
+            "bash" => Shell::Bash,
+            "zsh" => Shell::Zsh,
+            "fish" => Shell::Fish,
+            _ => {
+                eprintln!("Error: Unsupported shell '{}'. Supported: bash, zsh, fish", shell_name);
+                std::process::exit(1);
+            }
+        };
+        let mut cmd = CliArgs::command();
+        generate(shell, &mut cmd, "play", &mut std::io::stdout());
         return;
     }
 
