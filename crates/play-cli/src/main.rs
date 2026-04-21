@@ -17,7 +17,6 @@ use tracing::{error, info, warn};
 use play_core::models::environment::GameEnvironment;
 use play_core::models::errors::PlayError;
 use play_core::models::metrics::SessionMetrics;
-use play_core::models::plan::GamePlan;
 use play_core::modules::detection::RealCommandRunner;
 use play_core::modules::validation::FpsMetrics;
 use play_core::orchestrator::{Orchestrator, OrchestratorPhase};
@@ -57,6 +56,10 @@ struct CliArgs {
     /// File a crash report for last session
     #[arg(long)]
     report: bool,
+
+    /// Show about information
+    #[arg(long)]
+    about: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -78,141 +81,6 @@ fn setup_tracing(verbose: bool) {
 }
 
 // ---------------------------------------------------------------------------
-// Plan Display
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-fn display_plan(plan: &GamePlan, term: &Term) {
-    let _ = term.write_line(&format!("\n{}", style("═".repeat(60)).dim()));
-    let _ = term.write_line(&format!("  {}", style("Game Plan").bold().cyan()));
-    let _ = term.write_line(&format!("{}\n", style("═".repeat(60)).dim()));
-
-    // Identity section
-    let env = &plan.env;
-    let _ = term.write_line(&format!(
-        "  {}: {}",
-        style("Game").bold(),
-        style(&env.identity.exe_name).green()
-    ));
-    let _ = term.write_line(&format!(
-        "  {}: {}",
-        style("Hash").bold(),
-        style(&env.identity.exe_hash[..16.min(env.identity.exe_hash.len())]).dim()
-    ));
-    let _ =
-        term.write_line(&format!("  {}: {:?}", style("DirectX").bold(), env.identity.dx_version));
-
-    // Hardware section
-    let _ = term.write_line(&format!("\n  {}", style("Hardware").bold().underlined()));
-    let _ = term.write_line(&format!(
-        "    GPU: {:?} {} ({} MB)",
-        env.hardware.gpu.vendor, env.hardware.gpu.model, env.hardware.gpu.vram_mb
-    ));
-    let _ = term.write_line(&format!(
-        "    CPU: {} ({} cores)",
-        env.hardware.cpu.model, env.hardware.cpu.logical_cores
-    ));
-    let _ = term.write_line(&format!("    RAM: {} MB", env.hardware.memory.total_mb));
-    let _ = term
-        .write_line(&format!("    Audio: {:?} @ {} Hz", env.audio.backend, env.audio.server_rate));
-
-    // Runner section
-    let _ = term.write_line(&format!("\n  {}", style("Runner").bold().underlined()));
-    let _ =
-        term.write_line(&format!("    Type: {:?} v{}", env.runner.runner_type, env.runner.version));
-    let _ = term.write_line(&format!(
-        "    Status: {}",
-        match &plan.runner_action {
-            play_core::models::plan::RunnerAction::AlreadyInstalled { .. } =>
-                style("✓ Already installed").green(),
-            play_core::models::plan::RunnerAction::Download { .. } =>
-                style("⬇ Download required").yellow(),
-        }
-    ));
-
-    // Prefix section
-    let _ = term.write_line(&format!("\n  {}", style("Prefix").bold().underlined()));
-    let _ = term.write_line(&format!("    Arch: {:?}", env.prefix.arch));
-    let _ = term.write_line(&format!("    Windows: {:?}", env.prefix.windows_version));
-    let _ = term.write_line(&format!(
-        "    Status: {}",
-        match &plan.prefix_action {
-            play_core::models::plan::PrefixAction::AlreadyExists { .. } =>
-                style("✓ Exists").green(),
-            play_core::models::plan::PrefixAction::Create { .. } => style("⚠ Create new").yellow(),
-        }
-    ));
-
-    // Tweaks section
-    if !plan.tweaks.is_empty() {
-        let _ = term.write_line(&format!("\n  {}", style("System Tweaks").bold().underlined()));
-        for tweak in &plan.tweaks {
-            let status = match &tweak.decision {
-                play_core::models::plan::TweakDecision::Apply(_) => style("⚡ Apply").yellow(),
-                play_core::models::plan::TweakDecision::AlreadySatisfied => {
-                    style("✓ Already set").green()
-                },
-                play_core::models::plan::TweakDecision::NotApplicable { .. } => {
-                    style("⊘ Skip").dim()
-                },
-            };
-            let _ = term.write_line(&format!("    {:<25} {}", format!("{:?}", tweak.id), status));
-        }
-    }
-
-    // Warnings
-    if !plan.warnings.is_empty() {
-        let _ = term.write_line(&format!("\n  {}", style("Warnings").bold().underlined().yellow()));
-        for warning in &plan.warnings {
-            let _ = term.write_line(&format!("    ⚠ {}", warning.message));
-        }
-    }
-
-    // Hard blocks (shouldn't reach here if present, but show them)
-    if !plan.hard_blocks.is_empty() {
-        let _ =
-            term.write_line(&format!("\n  {}", style("BLOCKING ISSUES").bold().red().on_white()));
-        for block in &plan.hard_blocks {
-            let _ = term.write_line(&format!("    ✗ {}", block));
-        }
-    }
-
-    // Required packages
-    if !plan.required_packages.is_empty() {
-        let _ = term.write_line(&format!("\n  {}", style("Required Packages").bold().underlined()));
-        for pkg in &plan.required_packages {
-            let _ = term.write_line(&format!("    ⬇ {} ({})", pkg.name, pkg.reason));
-        }
-    }
-
-    let _ = term.write_line(&format!("\n{}", style("═".repeat(60)).dim()));
-}
-
-// ---------------------------------------------------------------------------
-// User Confirmation
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-fn confirm_prompt(term: &Term, yes_flag: bool) -> bool {
-    if yes_flag {
-        let _ = term.write_line(&format!("  {} (--yes flag set)", style("Auto-confirming").dim()));
-        return true;
-    }
-
-    let _ = term.write_line("");
-    let _ = term.write_str(&format!("  {} [Y/n] ", style("Proceed?").bold()));
-    let _ = term.flush();
-
-    let mut input = String::new();
-    if std::io::stdin().read_line(&mut input).is_err() {
-        return false;
-    }
-
-    let trimmed = input.trim().to_lowercase();
-    trimmed == "y" || trimmed == "yes" || trimmed.is_empty()
-}
-
-// ---------------------------------------------------------------------------
 // Update DB
 // ---------------------------------------------------------------------------
 
@@ -223,7 +91,11 @@ fn update_db() -> Result<(), PlayError> {
     info!(event = "update_db_start", path = %db_dir.display(), "Updating play-db");
 
     let pb = ProgressBar::new_spinner();
-    pb.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
     pb.set_message("Updating play-db...");
 
     // Check if directory exists and has .git
@@ -405,6 +277,15 @@ fn main() {
     setup_tracing(args.verbose);
 
     // Handle utility commands that don't need an exe_path
+    if args.about {
+        println!("{}", style("play").bold().cyan());
+        println!("  Linux gaming orchestrator — zero-config Windows game launcher");
+        println!();
+        println!("  Version: {}", env!("CARGO_PKG_VERSION"));
+        println!();
+        return;
+    }
+
     if args.update_db {
         if let Err(e) = update_db() {
             error!(event = "update_db_failed", error = %e, "Failed to update play-db");
@@ -419,7 +300,7 @@ fn main() {
         Some(path) => path,
         None => {
             eprintln!(
-                "{} game.exe required (unless using --update-db)",
+                "{} game.exe required (unless using --update-db or --about)",
                 style("Error:").red().bold()
             );
             std::process::exit(1);
@@ -503,8 +384,19 @@ fn main() {
         },
     }
 
-    // Run orchestrator lifecycle
+    // Run orchestrator lifecycle with progress indicator
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
+    pb.set_message("Initializing play session...");
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
     let result = orchestrator.run(&exe_path);
+
+    pb.finish_with_message("Session complete");
 
     match result {
         Ok(()) => {

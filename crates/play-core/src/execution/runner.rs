@@ -9,6 +9,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+use indicatif::ProgressBar;
 use sha2::{Digest, Sha512};
 
 use crate::models::errors::PlayError;
@@ -158,24 +159,51 @@ impl RunnerModule {
         })
     }
 
-    /// Single download attempt using ureq (blocking HTTP).
+    /// Single download attempt using ureq (blocking HTTP) with progress bar.
     fn download_once(url: &str, dest: &Path) -> Result<(), String> {
         let response = ureq::get(url).call().map_err(|e| format!("HTTP request failed: {e}"))?;
+
+        // Try to get content length for progress bar
+        let total_bytes = response
+            .header("content-length")
+            .and_then(|h| h.parse::<u64>().ok());
+
+        let pb = if let Some(total) = total_bytes {
+            let pb = ProgressBar::new(total);
+            pb.set_style(indicatif::ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+                .unwrap_or_else(|_| indicatif::ProgressStyle::default_bar())
+                .progress_chars("#>-"));
+            pb
+        } else {
+            let pb = ProgressBar::new_spinner();
+            pb.set_style(indicatif::ProgressStyle::default_spinner()
+                .template("{spinner:.green} {bytes} downloaded")
+                .unwrap_or_else(|_| indicatif::ProgressStyle::default_spinner()));
+            pb
+        };
+
+        pb.set_message(format!("Downloading {}", url.split('/').last().unwrap_or("file")));
 
         let mut reader = response.into_reader();
         let mut file = fs::File::create(dest).map_err(|e| format!("failed to create file: {e}"))?;
 
         let mut buf = vec![0u8; DOWNLOAD_BUF_SIZE];
+        let mut downloaded: u64 = 0;
+
         loop {
             let n = reader.read(&mut buf).map_err(|e| format!("read error: {e}"))?;
             if n == 0 {
                 break;
             }
             file.write_all(&buf[..n]).map_err(|e| format!("write error: {e}"))?;
+            downloaded += n as u64;
+            pb.set_position(downloaded);
         }
 
         file.flush().map_err(|e| format!("flush error: {e}"))?;
 
+        pb.finish_with_message("Download complete");
         Ok(())
     }
 

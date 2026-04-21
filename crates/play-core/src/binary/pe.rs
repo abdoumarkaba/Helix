@@ -106,6 +106,10 @@ fn detect_anti_cheat(imports: &[String]) -> Vec<AntiCheat> {
 
 /// Detect game engine from known DLL import signatures.
 fn detect_engine(imports: &[String]) -> Option<GameEngine> {
+    // Unreal Engine 5: UE5Game.dll or UE5-Win64-Shipping.dll patterns
+    if imports.iter().any(|i| i.contains("ue5")) {
+        return Some(GameEngine::UnrealEngine5);
+    }
     // Unreal Engine 4: ships PhysX/Phonon audio DLLs
     if imports.iter().any(|i| i.contains("phonon")) {
         return Some(GameEngine::UnrealEngine4);
@@ -456,6 +460,28 @@ mod tests {
         let pe = build_minimal_pe32(&["KERNEL32.dll", "tier0.dll", "vstdlib.dll"]);
         let result = analyze_pe_bytes(&pe).expect("analysis should succeed");
         assert_eq!(result.engine_hint, Some(GameEngine::Source));
+    }
+
+    #[test]
+    fn test_ue5_engine_detected_from_ue5game_dll() {
+        let pe = build_minimal_pe32(&["KERNEL32.dll", "UE5Game.dll"]);
+        let result = analyze_pe_bytes(&pe).expect("analysis should succeed");
+        assert_eq!(result.engine_hint, Some(GameEngine::UnrealEngine5));
+    }
+
+    #[test]
+    fn test_ue5_engine_detected_from_ue5_win64_shipping() {
+        let pe = build_minimal_pe32(&["KERNEL32.dll", "UE5-Win64-Shipping.dll"]);
+        let result = analyze_pe_bytes(&pe).expect("analysis should succeed");
+        assert_eq!(result.engine_hint, Some(GameEngine::UnrealEngine5));
+    }
+
+    #[test]
+    fn test_ue5_takes_precedence_over_ue4() {
+        // UE5 game that still imports phonon (UE4 audio DLL)
+        let pe = build_minimal_pe32(&["KERNEL32.dll", "phonon.dll", "UE5Game.dll"]);
+        let result = analyze_pe_bytes(&pe).expect("analysis should succeed");
+        assert_eq!(result.engine_hint, Some(GameEngine::UnrealEngine5));
     }
 
     #[test]
