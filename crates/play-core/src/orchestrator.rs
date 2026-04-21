@@ -254,6 +254,7 @@ impl Orchestrator {
     }
 
     /// Create an orchestrator with injectable path roots (for testing).
+    #[allow(clippy::too_many_arguments)]
     pub fn with_roots(
         proc_root: PathBuf,
         sys_root: PathBuf,
@@ -664,7 +665,7 @@ impl Orchestrator {
             path: temp_path.clone(),
             reason: format!("failed to write checkpoint: {e}"),
         })?;
-        fs::rename(&temp_path, &self.checkpoint_path()).map_err(|e| {
+        fs::rename(&temp_path, self.checkpoint_path()).map_err(|e| {
             PlayError::CheckpointFailed {
                 path: self.checkpoint_path(),
                 reason: format!("failed to rename checkpoint: {e}"),
@@ -731,15 +732,20 @@ impl Orchestrator {
         }
 
         // Rename temp directory to final hash-based name
-        fs::rename(&self.state_root, &new_state_root).map_err(|e| PlayError::CheckpointFailed {
-            path: self.state_root.clone(),
-            reason: format!(
-                "failed to rename state dir to {}: {e}",
-                new_state_root.display()
-            ),
-        })?;
-
-        self.state_root = new_state_root;
+        match fs::rename(&self.state_root, &new_state_root) {
+            Ok(()) => {
+                self.state_root = new_state_root;
+            }
+            Err(e) => {
+                return Err(PlayError::CheckpointFailed {
+                    path: self.state_root.clone(),
+                    reason: format!(
+                        "failed to rename state dir to {}: {e}",
+                        new_state_root.display()
+                    ),
+                });
+            }
+        }
 
         info!(
             event = "state_dir_renamed",
@@ -1024,8 +1030,8 @@ impl Orchestrator {
         println!();
         println!("{}", style("  PLAY PLAN").bold().cyan());
         println!("{}", style("  ").cyan());
-        println!("{}", style(format!("  Game: {}", plan.env.identity.exe_name)).cyan());
-        println!("{}", style(format!("  Hash: {}", plan.env.identity.exe_hash)).cyan());
+        println!("{}  Game: {}", style("").cyan(), plan.env.identity.exe_name);
+        println!("{}  Hash: {}", style("").cyan(), plan.env.identity.exe_hash);
         println!();
 
         // Show warnings
@@ -1041,9 +1047,10 @@ impl Orchestrator {
         for tweak in &plan.tweaks {
             if let crate::models::plan::TweakDecision::Apply(ref sys_tweak) = tweak.decision {
                 println!(
-                    "    {} {}",
+                    "    {} {:?}: {:?}",
                     style("·").cyan(),
-                    format!("{:?}: {:?}", tweak.id, sys_tweak)
+                    tweak.id,
+                    sys_tweak
                 );
             }
         }

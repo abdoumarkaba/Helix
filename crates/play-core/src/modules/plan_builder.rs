@@ -307,20 +307,14 @@ impl<'a> PlanBuilder<'a> {
         layer: &TranslationLayer,
         _warnings: &mut Vec<PlanWarning>,
     ) -> Vec<RequiredPackage> {
-        let mut pkgs: Vec<RequiredPackage> = Vec::new();
-
         // Wine is always required.
-        pkgs.push(RequiredPackage {
+        // DXVK and VKD3D-Proton are bundled in Proton-GE, no separate installation needed.
+        let _ = layer;
+        vec![RequiredPackage {
             name: "wine".to_owned(),
             reason: "Wine runtime for Windows binary execution.".to_owned(),
             already_installed: false, // ExecutionModule will verify
-        });
-
-        // DXVK and VKD3D-Proton are bundled in Proton-GE, no separate installation needed.
-        // The translation layer selection still affects runner configuration.
-        let _ = layer;
-
-        pkgs
+        }]
     }
 
     fn mangohud_hint(&self) -> String {

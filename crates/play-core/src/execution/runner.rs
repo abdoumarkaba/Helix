@@ -144,13 +144,13 @@ impl RunnerModule {
                 check_disk_space(&self.runners_install_root)?;
 
                 // Download with retries
-                self.download_with_retries(url, &archive_path)?;
+                Self::download_with_retries(url, &archive_path)?;
 
                 // Verify SHA512
-                self.verify_checksum(&archive_path, sha512)?;
+                Self::verify_checksum(&archive_path, sha512)?;
 
                 // Extract
-                self.extract(&archive_path, &self.runners_install_root)?;
+                Self::extract(&archive_path, &self.runners_install_root)?;
 
                 // Clean up archive
                 if let Err(e) = fs::remove_file(&archive_path) {
@@ -181,7 +181,7 @@ impl RunnerModule {
     }
 
     /// Download a file with up to `MAX_RETRIES` attempts.
-    fn download_with_retries(&self, url: &str, dest: &Path) -> Result<(), PlayError> {
+    pub fn download_with_retries(url: &str, dest: &Path) -> Result<(), PlayError> {
         for attempt in 1..=MAX_RETRIES {
             match Self::download_once(url, dest) {
                 Ok(()) => return Ok(()),
@@ -235,7 +235,7 @@ impl RunnerModule {
             pb
         };
 
-        pb.set_message(format!("Downloading {}", url.split('/').last().unwrap_or("file")));
+        pb.set_message(format!("Downloading {}", url.split('/').next_back().unwrap_or("file")));
 
         let mut reader = response.into_reader();
         let mut file = fs::File::create(dest).map_err(|e| format!("failed to create file: {e}"))?;
@@ -261,7 +261,7 @@ impl RunnerModule {
 
     /// Verify SHA512 checksum of a file against the expected hex digest.
     /// GE-Proton releases provide SHA512 checksums as .sha512sum files.
-    fn verify_checksum(&self, path: &Path, expected: &str) -> Result<(), PlayError> {
+    pub fn verify_checksum(path: &Path, expected: &str) -> Result<(), PlayError> {
         let mut file = fs::File::open(path).map_err(|e| PlayError::RunnerDownload {
             url: String::new(),
             attempt: 1,
@@ -294,7 +294,7 @@ impl RunnerModule {
     }
 
     /// Extract a .tar.gz archive to the target directory.
-    fn extract(&self, archive: &Path, dest: &Path) -> Result<(), PlayError> {
+    pub fn extract(archive: &Path, dest: &Path) -> Result<(), PlayError> {
         // Use std::process::Command to call tar, since the tar crate is not
         // in our dependencies and tar is available on all target distros.
         let status = std::process::Command::new("tar")
@@ -309,14 +309,14 @@ impl RunnerModule {
                 reason: format!("failed to spawn tar: {e}"),
             })?;
 
-        if !status.success() {
+        if status.success() {
+            Ok(())
+        } else {
             Err(PlayError::RunnerDownload {
                 url: String::new(),
                 attempt: 1,
                 reason: format!("tar extraction failed with exit code {:?}", status.code()),
             })
-        } else {
-            Ok(())
         }
     }
 }
@@ -369,8 +369,7 @@ mod tests {
         // Pre-computed SHA512 of "hello world"
         let expected = "309ecc489c12d6eb4cc40f50c902f2b4d0ed77ee511a7c7a9bcd3ca86d4cd86f989dd35bc5ff499670da34255b45b0cfd830e81f605dcf7dc5542e93ae9cd76f";
 
-        let module = RunnerModule::new(dir.path().to_path_buf());
-        let result = module.verify_checksum(&file_path, expected);
+        let result = RunnerModule::verify_checksum(&file_path, expected);
         assert!(result.is_ok());
     }
 
@@ -380,8 +379,7 @@ mod tests {
         let file_path = dir.path().join("test.bin");
         fs::write(&file_path, b"hello world").unwrap();
 
-        let module = RunnerModule::new(dir.path().to_path_buf());
-        let result = module.verify_checksum(&file_path, "0000000000000000");
+        let result = RunnerModule::verify_checksum(&file_path, "0000000000000000");
         assert!(result.is_err());
         assert!(matches!(result, Err(PlayError::ChecksumMismatch { .. })));
 

@@ -84,13 +84,30 @@ pub fn parse_kernel_version(s: &str) -> Option<KernelVersion> {
     Some(KernelVersion { major, minor, patch })
 }
 
-/// Read /proc/version and parse it into a [`KernelVersion`].
+/// Read kernel version from /proc/version or uname fallback.
 pub fn read_kernel_version(proc_root: &Path) -> Result<KernelVersion, PlayError> {
+    // Try /proc/version first
     let path = proc_root.join("version");
-    let contents = fs::read_to_string(&path)
+    if let Ok(contents) = fs::read_to_string(&path) {
+        if let Some(version) = parse_kernel_version(&contents) {
+            return Ok(version);
+        }
+    }
+
+    // Fallback to uname -r
+    let output = std::process::Command::new("uname")
+        .arg("-r")
+        .output()
         .map_err(|_| PlayError::HardwareDetection { component: "kernel.version".into() })?;
-    parse_kernel_version(&contents)
-        .ok_or_else(|| PlayError::HardwareDetection { component: "kernel.version".into() })
+
+    if output.status.success() {
+        let version_str = String::from_utf8_lossy(&output.stdout);
+        if let Some(version) = parse_kernel_version(&version_str) {
+            return Ok(version);
+        }
+    }
+
+    Err(PlayError::HardwareDetection { component: "kernel.version".into() })
 }
 
 /// Check whether futex2 is supported (kernel >= 5.16).

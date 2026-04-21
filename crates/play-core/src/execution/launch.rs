@@ -1,4 +1,4 @@
-//! LaunchModule — spawns the game process via the resolved runner.
+//! `LaunchModule` — spawns the game process via the resolved runner.
 //!
 //! Security: Never uses shell strings. All arguments are passed explicitly
 //! to `Command::spawn()` to prevent injection when paths contain spaces.
@@ -17,7 +17,8 @@ const LAUNCH_STABILIZE_SECS: u64 = 12;
 pub struct LaunchModule;
 
 impl LaunchModule {
-    /// Create a new LaunchModule.
+    /// Create a new `LaunchModule`.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -36,12 +37,11 @@ impl LaunchModule {
                 env,
                 runner_path,
                 runner_type,
-            } => self.spawn_game(exe_path, working_dir, args, env, runner_path, *runner_type),
+            } => Self::spawn_game(exe_path, working_dir, args, env, runner_path, *runner_type),
         }
     }
 
     fn spawn_game(
-        &self,
         exe_path: &PathBuf,
         working_dir: &PathBuf,
         args: &[String],

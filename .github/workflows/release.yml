@@ -21,12 +21,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: v1-glm5.1
 
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: release
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
 
       - name: Install cross-compilation tools
         run: |
@@ -41,6 +42,7 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           tar czf play-${{ matrix.target }}.tar.gz play
+          cd -
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -59,12 +61,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: play-*
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            artifacts/*/play-*.tar.gz
+          files: artifacts/*/play-*.tar.gz
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
