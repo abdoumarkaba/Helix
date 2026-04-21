@@ -95,11 +95,12 @@ fn setup_tracing(verbose: bool) -> PathBuf {
         eprintln!("Warning: Failed to create log directory: {}", e);
     }
 
-    // Set up file appender for daily rotating logs with naming: play-YYYY-MM-DD.log
+    // Set up file appender for daily rotating logs with naming: play.YYYY-MM-DD
+    // tracing_appender format: {prefix}.{date} → play.2026-04-21
     let file_appender = tracing_appender::rolling::RollingFileAppender::new(
         tracing_appender::rolling::Rotation::DAILY,
         &log_dir,
-        "play-",
+        "play",
     );
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
@@ -245,7 +246,8 @@ fn display_error_with_context(
     }
 
     // Show log file location
-    let log_file = log_dir.join(format!("play-{}.log", Local::now().format("%Y-%m-%d")));
+    // tracing_appender produces: play.2026-04-21 (no extension, period separator)
+    let log_file = log_dir.join(format!("play.{}", Local::now().format("%Y-%m-%d")));
     eprintln!("\n  {} {}", style("Log file:").dim(), log_file.display());
 }
 

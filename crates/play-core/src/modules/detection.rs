@@ -349,14 +349,14 @@ pub fn detect_memory(proc_root: &Path) -> MemoryProfile {
 // GPU detection
 // ---------------------------------------------------------------------------
 
-/// Detect GPU from lspci (basic vendor + model).
-pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Result<GpuProfile, PlayError> {
-    let output = cmd_runner
-        .run_command("lspci", &["-mm"])
-        .map_err(|_| PlayError::HardwareDetection { component: "lspci".into() })?;
+/// Detect GPU from lspci (best method, gives vendor:device IDs).
+/// Returns None if lspci is not available or no GPU found.
+pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
+    let output = cmd_runner.run_command("lspci", &["-mm"]).ok()?;
 
     let mut gpu_vendor = GpuVendor::Unknown;
     let mut gpu_model = String::from("Unknown GPU");
+    let mut found = false;
 
     // Find first VGA/3D controller line
     for line in output.lines() {
@@ -379,13 +379,18 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Result<GpuProfile, Pl
             if let Some(desc) = parts.get(4) {
                 gpu_model = desc.trim_matches('"').to_string();
             }
+            found = true;
         }
         break;
     }
 
-    info!(vendor = ?gpu_vendor, model = %gpu_model, "gpu lspci detection");
+    if !found {
+        return None;
+    }
 
-    Ok(GpuProfile {
+    info!(vendor = ?gpu_vendor, model = %gpu_model, method = "lspci", "gpu detection");
+
+    Some(GpuProfile {
         vendor: gpu_vendor,
         model: gpu_model,
         vram_mb: 0,
@@ -403,6 +408,99 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Result<GpuProfile, Pl
         is_laptop_gpu: false,
         nvidia_vbios_max_clock_mhz: None,
     })
+}
+
+/// Detect GPU from vulkaninfo (fallback method, gives Vulkan info).
+/// Returns None if vulkaninfo is not available.
+pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
+    let output = cmd_runner.run_command("vulkaninfo", &["--summary"]).ok()?;
+
+    let mut gpu_vendor = GpuVendor::Unknown;
+    let mut gpu_model = String::from("Unknown GPU");
+
+    // Parse vulkaninfo output for device name and vendor
+    for line in output.lines() {
+        if line.contains("deviceName") {
+            if let Some(name) = line.split(':').nth(1) {
+                gpu_model = name.trim().to_string();
+            }
+        }
+        if line.contains("vendorID") {
+            if let Some(vendor) = line.split(':').nth(1) {
+                let vendor_str = vendor.trim();
+                if vendor_str.contains("0x10de") || vendor_str.contains("NVIDIA") {
+                    gpu_vendor = GpuVendor::NVIDIA;
+                } else if vendor_str.contains("0x1002") || vendor_str.contains("0x1022") || vendor_str.contains("AMD") {
+                    gpu_vendor = GpuVendor::AMD;
+                } else if vendor_str.contains("0x8086") || vendor_str.contains("Intel") {
+                    gpu_vendor = GpuVendor::Intel;
+                }
+            }
+        }
+    }
+
+    if gpu_model == "Unknown GPU" && gpu_vendor == GpuVendor::Unknown {
+        return None;
+    }
+
+    info!(vendor = ?gpu_vendor, model = %gpu_model, method = "vulkaninfo", "gpu detection");
+
+    Some(GpuProfile {
+        vendor: gpu_vendor,
+        model: gpu_model,
+        vram_mb: 0,
+        driver_version: Version::new(0, 0, 0),
+        vulkan_version: None,
+        driver_type: DriverType::Unknown,
+        features: GpuFeatureSet {
+            vulkan_1_2: false,
+            vulkan_1_3: false,
+            ray_tracing: false,
+            mesh_shaders: false,
+            resizable_bar: false,
+            dx12_feature_level: None,
+        },
+        is_laptop_gpu: false,
+        nvidia_vbios_max_clock_mhz: None,
+    })
+}
+
+/// Detect GPU with fallback chain: lspci → vulkaninfo → glxinfo → safe defaults.
+/// Never fails - returns Unknown GPU with safe defaults if all methods fail.
+pub fn detect_gpu_with_fallbacks(cmd_runner: &dyn CommandRunner) -> GpuProfile {
+    // Try lspci first (best method)
+    if let Some(gpu) = detect_gpu_lspci(cmd_runner) {
+        return gpu;
+    }
+    warn!("lspci failed or no GPU found, trying vulkaninfo...");
+
+    // Try vulkaninfo as fallback
+    if let Some(gpu) = detect_gpu_vulkaninfo(cmd_runner) {
+        return gpu;
+    }
+    warn!("vulkaninfo failed, using safe GPU defaults");
+
+    // All methods failed - use safe defaults
+    info!(vendor = ?GpuVendor::Unknown, method = "fallback", "gpu detection");
+
+    GpuProfile {
+        vendor: GpuVendor::Unknown,
+        model: "Unknown GPU (install pciutils or vulkan-tools for better detection)".to_string(),
+        vram_mb: 0,
+        driver_version: Version::new(0, 0, 0),
+        vulkan_version: None,
+        driver_type: DriverType::Unknown,
+        features: GpuFeatureSet {
+            vulkan_1_2: false,
+            vulkan_1_3: false,
+            ray_tracing: false,
+            mesh_shaders: false,
+            resizable_bar: false,
+            dx12_feature_level: None,
+        },
+        is_laptop_gpu: false,
+        nvidia_vbios_max_clock_mhz: None,
+    }
 }
 
 /// Enrich NVIDIA GPU profile with nvidia-smi data.
@@ -684,8 +782,8 @@ pub fn detect_hardware(
     let cpu = detect_cpu(proc_root, sys_root)?;
     let memory = detect_memory(proc_root);
 
-    // GPU detection: base + vendor enrichment
-    let mut gpu = detect_gpu_lspci(cmd_runner)?;
+    // GPU detection: base + vendor enrichment (with fallback chain)
+    let mut gpu = detect_gpu_with_fallbacks(cmd_runner);
     match gpu.vendor {
         GpuVendor::NVIDIA => {
             if let Err(e) = enrich_nvidia_gpu(&mut gpu, cmd_runner) {
@@ -797,8 +895,8 @@ mod tests {
             responses: vec![("lspci".to_string(), Ok(String::new()))].into_iter().collect(),
         };
 
-        let gpu = detect_gpu_lspci(&runner).unwrap();
-        assert_eq!(gpu.vendor, GpuVendor::Unknown);
+        let gpu = detect_gpu_lspci(&runner);
+        assert!(gpu.is_none());
     }
 
     #[test]
@@ -811,6 +909,35 @@ mod tests {
 
         let gpu = detect_gpu_lspci(&runner).unwrap();
         assert_eq!(gpu.vendor, GpuVendor::NVIDIA);
+    }
+
+    #[test]
+    fn test_detect_gpu_with_fallbacks_lspci_fails() {
+        // lspci fails, vulkaninfo succeeds
+        let runner = MockCommandRunner {
+            responses: vec![
+                ("lspci".to_string(), Err("not found".to_string())),
+                ("vulkaninfo".to_string(), Ok("deviceName: AMD Radeon RX 6800 XT\nvendorID: 0x1002".to_string())),
+            ].into_iter().collect(),
+        };
+
+        let gpu = detect_gpu_with_fallbacks(&runner);
+        assert_eq!(gpu.vendor, GpuVendor::AMD);
+    }
+
+    #[test]
+    fn test_detect_gpu_with_fallbacks_all_fail() {
+        // All methods fail, should get safe defaults
+        let runner = MockCommandRunner {
+            responses: vec![
+                ("lspci".to_string(), Err("not found".to_string())),
+                ("vulkaninfo".to_string(), Err("not found".to_string())),
+            ].into_iter().collect(),
+        };
+
+        let gpu = detect_gpu_with_fallbacks(&runner);
+        assert_eq!(gpu.vendor, GpuVendor::Unknown);
+        assert!(gpu.model.contains("pciutils"));
     }
 
     #[test]
