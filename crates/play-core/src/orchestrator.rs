@@ -178,9 +178,31 @@ pub struct Orchestrator {
     confirm_callback: Option<ConfirmCallback>,
     /// Handle to the spawned game process (set during execution phase).
     running_game: Option<std::process::Child>,
+    /// Progress callback for phase updates.
+    progress_callback: Option<Box<dyn Fn(String) + Send>>,
 }
 
 impl Orchestrator {
+    /// Get the current rollback manifest (for error display).
+    pub fn rollback_manifest(&self) -> &[RollbackEntry] {
+        &self.rollback_manifest
+    }
+
+    /// Set progress callback for phase updates.
+    pub fn set_progress_callback<F>(&mut self, callback: F)
+    where
+        F: Fn(String) + Send + 'static,
+    {
+        self.progress_callback = Some(Box::new(callback));
+    }
+
+    /// Report progress to callback if set.
+    fn report_progress(&self, message: &str) {
+        if let Some(ref cb) = self.progress_callback {
+            cb(message.to_string());
+        }
+    }
+
     /// Create a new orchestrator for the given executable.
     ///
     /// # Arguments
@@ -217,6 +239,7 @@ impl Orchestrator {
             cmd_runner,
             confirm_callback: None,
             running_game: None,
+            progress_callback: None,
         }
     }
 
@@ -248,6 +271,7 @@ impl Orchestrator {
             cmd_runner,
             confirm_callback: None,
             running_game: None,
+            progress_callback: None,
         }
     }
 
@@ -383,6 +407,7 @@ impl Orchestrator {
     fn detect(&mut self, exe_path: &Path) -> Result<(), PlayError> {
         debug_assert_eq!(self.phase, OrchestratorPhase::Initialized);
 
+        self.report_progress("Detecting hardware...");
         info!(event = "phase_start", phase = "detection", "Starting detection phase");
 
         // Hardware detection
@@ -433,6 +458,7 @@ impl Orchestrator {
     fn plan_phase(&mut self) -> Result<(), PlayError> {
         debug_assert_eq!(self.phase, OrchestratorPhase::Detected);
 
+        self.report_progress("Planning configuration...");
         info!(event = "phase_start", phase = "planning", "Starting planning phase");
 
         let env = self.env.as_ref().ok_or_else(|| PlayError::OrchestratorFailed {
@@ -499,10 +525,12 @@ impl Orchestrator {
 
         // Install required packages
         if !plan.required_packages.is_empty() {
+            self.report_progress("Installing required packages...");
             self.install_packages(&plan.required_packages)?;
         }
 
         // Ensure runner
+        self.report_progress("Downloading runner...");
         let runner_module = RunnerModule::new(self.runners_root.clone());
         runner_module.execute(&plan.runner_action)?;
 
@@ -511,6 +539,7 @@ impl Orchestrator {
         prefix_module.execute(&plan.prefix_action)?;
 
         // Apply system tweaks
+        self.report_progress("Applying system tweaks...");
         let system_module = crate::execution::system::SystemModule::new(
             self.sys_root.clone(),
             self.cmd_runner.clone_boxed(),
@@ -533,6 +562,7 @@ impl Orchestrator {
         self.record_rollback_entries(&tweaks_clone);
 
         // Launch the game
+        self.report_progress("Launching game...");
         let launch_module = crate::execution::launch::LaunchModule::new();
         let child = launch_module.execute(&launch_action)?;
         self.running_game = Some(child);

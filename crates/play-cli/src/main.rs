@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use chrono::Local;
 use chrono::Utc;
 use clap::Parser;
 use serde_json::Value as JsonValue;
@@ -60,13 +61,44 @@ struct CliArgs {
     /// Show about information
     #[arg(long)]
     about: bool,
+
+    /// Show log file location
+    #[arg(long)]
+    log_path: bool,
 }
 
 // ---------------------------------------------------------------------------
 // Tracing Setup
 // ---------------------------------------------------------------------------
 
-fn setup_tracing(verbose: bool) {
+fn get_log_dir() -> PathBuf {
+    data_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+        .join("play")
+        .join("logs")
+}
+
+fn setup_tracing(verbose: bool) -> PathBuf {
+    let log_dir = get_log_dir();
+
+    // Create log directory if it doesn't exist
+    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+        eprintln!("Warning: Failed to create log directory: {}", e);
+    }
+
+    // Set up file appender for daily rotating logs with naming: play-YYYY-MM-DD.log
+    let file_appender = tracing_appender::rolling::RollingFileAppender::new(
+        tracing_appender::rolling::Rotation::DAILY,
+        &log_dir,
+        "play-",
+    );
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // Keep the guard alive for the duration of the program
+    // Note: In production, we'd want to store this in a static or pass it around
+    // For now, we leak it to keep logging working for the program lifetime
+    Box::leak(Box::new(_guard));
+
     let filter = if verbose {
         "play_core=debug,play_cli=debug,info"
     } else {
@@ -75,9 +107,137 @@ fn setup_tracing(verbose: bool) {
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
+        .with_writer(non_blocking)
+        .with_ansi(false)
         .with_target(false)
         .with_thread_ids(false)
         .init();
+
+    log_dir
+}
+
+// ---------------------------------------------------------------------------
+// Error Display
+// ---------------------------------------------------------------------------
+
+/// Display error with full context including rollback information and next steps.
+fn display_error_with_context(
+    error: &PlayError,
+    exe_path: &Path,
+    log_dir: &Path,
+    rollback_entries: &[play_core::orchestrator::RollbackEntry],
+) {
+    eprintln!("\n  {} {}", style("Error:").red().bold(), error);
+
+    // Extract error-specific context
+    let error_context = match error {
+        PlayError::RunnerDownload { url, attempt, reason } => {
+            Some(format!(
+                "  URL: {}\n  Attempt: {}/3\n  Reason: {}",
+                url, attempt, reason
+            ))
+        },
+        PlayError::PackageInstall { pm, package, .. } => {
+            Some(format!("  Package manager: {}\n  Package: {}", pm, package))
+        },
+        PlayError::GameCrash { seconds, .. } => {
+            Some(format!("  Crashed after: {} seconds", seconds))
+        },
+        PlayError::GameLaunchFailed { exe_path, reason } => {
+            Some(format!("  Executable: {}\n  Reason: {}", exe_path.display(), reason))
+        },
+        _ => None,
+    };
+
+    if let Some(ctx) = error_context {
+        eprintln!("{}", ctx);
+    }
+
+    // Show rollback information if any
+    if !rollback_entries.is_empty() {
+        eprintln!("\n  {}", style("Rollback completed:").yellow().bold());
+        for entry in rollback_entries {
+            eprintln!("    · Restored {}: {}", entry.key, entry.previous_value);
+        }
+    }
+
+    // Provide next steps based on error type
+    eprintln!("\n  {}", style("Next steps:").cyan().bold());
+
+    match error {
+        PlayError::RunnerDownload { .. } => {
+            eprintln!("    1. Check your internet connection");
+            eprintln!("    2. Run {} to refresh runner manifest", style("play --update-db").cyan());
+            eprintln!(
+                "    3. Try again: {}",
+                style(format!("play {}", exe_path.display())).cyan()
+            );
+            eprintln!(
+                "    4. Or rollback: {}",
+                style(format!("play --undo {}", exe_path.display())).cyan()
+            );
+        },
+        PlayError::PackageInstall { .. } => {
+            eprintln!("    1. Check if package manager is working");
+            eprintln!("    2. Try installing manually with your package manager");
+            eprintln!(
+                "    3. Try again: {}",
+                style(format!("play {}", exe_path.display())).cyan()
+            );
+            eprintln!(
+                "    4. Or rollback: {}",
+                style(format!("play --undo {}", exe_path.display())).cyan()
+            );
+        },
+        PlayError::GameCrash { .. } => {
+            eprintln!(
+                "    1. Run {} to file a crash report",
+                style(format!("play --report {}", exe_path.display())).cyan()
+            );
+            eprintln!("    2. Check the game logs for crash details");
+            eprintln!("    3. Try running with different compatibility settings");
+        },
+        PlayError::ValidationFailed { .. } => {
+            eprintln!("    1. Check if game process is still running");
+            eprintln!("    2. Verify GPU drivers are installed and working");
+            eprintln!(
+                "    3. Run {} to file a report",
+                style(format!("play --report {}", exe_path.display())).cyan()
+            );
+        },
+        PlayError::NoRunnerAvailable { .. } => {
+            eprintln!("    1. Run {} to refresh runner manifest", style("play --update-db").cyan());
+            eprintln!("    2. Check play-db for available runners");
+            eprintln!("    3. Try a different game or wait for runner update");
+        },
+        PlayError::UnsupportedDistro { .. } => {
+            eprintln!("    1. Check if your distro is supported");
+            eprintln!("    2. Try running on a supported distro (Ubuntu 22.04+, Fedora 38+, Arch, Debian 12+)");
+        },
+        PlayError::InsufficientVram { .. } => {
+            eprintln!("    1. Close other applications to free VRAM");
+            eprintln!("    2. Lower game graphics settings");
+            eprintln!("    3. Consider upgrading your GPU");
+        },
+        _ => {
+            eprintln!(
+                "    1. Check the log file for details: {}",
+                style("play --log-path").cyan()
+            );
+            eprintln!(
+                "    2. Try again: {}",
+                style(format!("play {}", exe_path.display())).cyan()
+            );
+            eprintln!(
+                "    3. Or rollback: {}",
+                style(format!("play --undo {}", exe_path.display())).cyan()
+            );
+        },
+    }
+
+    // Show log file location
+    let log_file = log_dir.join(format!("play-{}.log", Local::now().format("%Y-%m-%d")));
+    eprintln!("\n  {} {}", style("Log file:").dim(), log_file.display());
 }
 
 // ---------------------------------------------------------------------------
@@ -274,9 +434,14 @@ fn create_orchestrator(
 fn main() {
     let args = CliArgs::parse();
 
-    setup_tracing(args.verbose);
+    let log_dir = setup_tracing(args.verbose);
 
     // Handle utility commands that don't need an exe_path
+    if args.log_path {
+        println!("{}", log_dir.display());
+        return;
+    }
+
     if args.about {
         println!("{}", style("play").bold().cyan());
         println!("  Linux gaming orchestrator — zero-config Windows game launcher");
@@ -286,6 +451,7 @@ fn main() {
         return;
     }
 
+    // Handle --update-db after logging is set up
     if args.update_db {
         if let Err(e) = update_db() {
             error!(event = "update_db_failed", error = %e, "Failed to update play-db");
@@ -300,9 +466,11 @@ fn main() {
         Some(path) => path,
         None => {
             eprintln!(
-                "{} game.exe required (unless using --update-db or --about)",
-                style("Error:").red().bold()
+                "{} Run with a .exe file to optimize your system and launch the game",
+                style("Usage:").green().bold()
             );
+            eprintln!("  {} play <game.exe>", style("Example:").dim());
+            eprintln!("  {} play --help for more options", style("Or:").dim());
             std::process::exit(1);
         },
     };
@@ -394,6 +562,12 @@ fn main() {
     pb.set_message("Initializing play session...");
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
+    // Set progress callback to update progress bar
+    let progress_bar = pb.clone();
+    orchestrator.set_progress_callback(move |msg: String| {
+        progress_bar.set_message(msg);
+    });
+
     let result = orchestrator.run(&exe_path);
 
     pb.finish_with_message("Session complete");
@@ -440,23 +614,13 @@ fn main() {
         Err(e) => {
             error!(event = "run_failed", error = %e, "Orchestrator failed");
 
-            // Check if it's a crash vs other error
-            let is_crash = matches!(&e, PlayError::ValidationFailed { .. });
-
             eprintln!(
-                "\n  {} {}",
-                style("✗").red().bold(),
+                "\n  {}",
                 style("Game session failed").red().bold()
             );
-            eprintln!("  {} {}", style("Error:").red(), e);
 
-            if is_crash {
-                println!("\n  {}", style("This appears to be a game crash.").yellow());
-                println!(
-                    "  Run {} to file a report.",
-                    style(format!("play --report {}", exe_path.display())).cyan()
-                );
-            }
+            // Display error with full context including rollback info
+            display_error_with_context(&e, &exe_path, &log_dir, orchestrator.rollback_manifest());
 
             std::process::exit(1);
         },
