@@ -13,7 +13,7 @@ use crate::models::environment::{
 };
 use crate::models::errors::PlayError;
 use crate::models::plan::{
-    DbEntry, PrefixAction, RunnerAction, RunnersManifest, SystemTweak, TweakConstraint,
+    PrefixAction, RunnerAction, RunnersManifest, SystemTweak, TweakConstraint,
     TweakDecision, TweakId,
 };
 
@@ -98,11 +98,7 @@ impl DecisionEngine {
     // -----------------------------------------------------------------------
 
     /// Async compilation must be disabled for VAC/EAC/BattlEye-protected games.
-    pub fn configure_dxvk_async(
-        anti_cheat: &[AntiCheat],
-        _db: Option<&DbEntry>,
-    ) -> (bool, ResolutionDecision) {
-        // DB explicit override would go here if DbEntry gains async_compile_override.
+    pub fn configure_dxvk_async(anti_cheat: &[AntiCheat]) -> (bool, ResolutionDecision) {
 
         let (enabled, reason) = if anti_cheat.iter().any(|ac| {
             matches!(
@@ -135,14 +131,13 @@ impl DecisionEngine {
     /// Version is always resolved from the manifest — NEVER hardcoded.
     pub fn select_runner(
         _anti_cheat: &[AntiCheat],
-        db: Option<&DbEntry>,
         manifest: &RunnersManifest,
         identity: &GameIdentity,
     ) -> Result<(RunnerType, Version, ResolutionDecision), PlayError> {
-        // DB can override runner type (e.g. wine-ge for very old 32-bit games).
-        let runner_type = db.and_then(|d| d.runner_type_override).unwrap_or(RunnerType::ProtonGE);
+        // Always use ProtonGE as default (broadest compatibility)
+        let runner_type = RunnerType::ProtonGE;
 
-        let version_floor: Option<Version> = db.and_then(|d| d.runner_version_min.clone());
+        let version_floor: Option<Version> = None;
 
         let candidates: Vec<&crate::models::plan::RunnerRelease> = manifest
             .runners
@@ -161,11 +156,7 @@ impl DecisionEngine {
             }
         })?;
 
-        let source_note = if db.and_then(|d| d.runner_type_override).is_some() {
-            "play-db specifies runner type; "
-        } else {
-            ""
-        };
+        let source_note = "";
 
         // Identity signals that strengthen the ProtonGE choice
         let identity_reason = if identity.has_video_cutscenes == Some(true) {
@@ -194,11 +185,7 @@ impl DecisionEngine {
                     best.version
                 ),
                 confidence: Confidence::High,
-                source: if db.and_then(|d| d.runner_type_override).is_some() {
-                    DecisionSource::Database
-                } else {
-                    DecisionSource::Heuristic
-                },
+                source: DecisionSource::Heuristic,
             },
         ))
     }
@@ -207,14 +194,9 @@ impl DecisionEngine {
     // Windows version
     // -----------------------------------------------------------------------
 
-    pub fn select_windows_version(
-        db: Option<&DbEntry>,
-        dx_version: DirectXVersion,
-    ) -> (WindowsVersion, ResolutionDecision) {
+    pub fn select_windows_version(dx_version: DirectXVersion) -> (WindowsVersion, ResolutionDecision) {
         let (version, reason, source) =
-            if let Some(ov) = db.and_then(|d| d.windows_version_override) {
-                (ov, "play-db specifies Windows version for this game.", DecisionSource::Database)
-            } else if dx_version == DirectXVersion::D3D9 {
+            if dx_version == DirectXVersion::D3D9 {
                 // Some old D3D9 games reject Win10; Win7 has better compatibility.
                 (
                 WindowsVersion::Win7,
@@ -235,11 +217,7 @@ impl DecisionEngine {
                 field: "prefix.windows_version".to_owned(),
                 chosen: format!("{version:?}"),
                 reason: reason.to_owned(),
-                confidence: if source == DecisionSource::Database {
-                    Confidence::High
-                } else {
-                    Confidence::Medium
-                },
+                confidence: Confidence::Medium,
                 source,
             },
         )
@@ -687,20 +665,20 @@ mod tests {
     #[test]
     fn denuvo_disables_async() {
         let ac = vec![AntiCheat::Denuvo];
-        let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac, None);
+        let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac);
         assert!(!enabled);
     }
 
     #[test]
     fn eac_disables_async() {
         let ac = vec![AntiCheat::EasyAntiCheat { linux_supported: true }];
-        let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac, None);
+        let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac);
         assert!(!enabled);
     }
 
     #[test]
     fn no_anticheat_enables_async() {
-        let (enabled, _) = DecisionEngine::configure_dxvk_async(&[], None);
+        let (enabled, _) = DecisionEngine::configure_dxvk_async(&[]);
         assert!(enabled);
     }
 
@@ -901,21 +879,21 @@ mod tests {
     // --- windows version ---
 
     #[test]
-    fn d3d9_without_db_selects_win7() {
-        let (version, dec) = DecisionEngine::select_windows_version(None, DirectXVersion::D3D9);
+    fn d3d9_selects_win7() {
+        let (version, dec) = DecisionEngine::select_windows_version(DirectXVersion::D3D9);
         assert_eq!(version, WindowsVersion::Win7);
         assert!(dec.reason.contains("D3D9"));
     }
 
     #[test]
-    fn d3d11_without_db_selects_win10() {
-        let (version, _) = DecisionEngine::select_windows_version(None, DirectXVersion::D3D11);
+    fn d3d11_selects_win10() {
+        let (version, _) = DecisionEngine::select_windows_version(DirectXVersion::D3D11);
         assert_eq!(version, WindowsVersion::Win10);
     }
 
     #[test]
-    fn d3d12_without_db_selects_win10() {
-        let (version, _) = DecisionEngine::select_windows_version(None, DirectXVersion::D3D12);
+    fn d3d12_selects_win10() {
+        let (version, _) = DecisionEngine::select_windows_version(DirectXVersion::D3D12);
         assert_eq!(version, WindowsVersion::Win10);
     }
 
@@ -1063,42 +1041,11 @@ mod tests {
     }
 
     #[test]
-    fn select_runner_no_candidates_returns_no_runner_available() {
-        // Manifest has only ProtonGE runners, but DB override asks for WineGE
-        let manifest = make_manifest(RunnerType::ProtonGE, &["8.25.0", "8.26.0"]);
-        let db = DbEntry { runner_type_override: Some(RunnerType::WineGE), ..Default::default() };
-        let identity = make_identity();
-
-        let result = DecisionEngine::select_runner(&[], Some(&db), &manifest, &identity);
-        assert!(
-            matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
-            "expected NoRunnerAvailable when no candidates match type, got: {result:?}"
-        );
-    }
-
-    #[test]
-    fn select_runner_version_floor_excludes_all() {
-        // All runners below the floor
-        let manifest = make_manifest(RunnerType::ProtonGE, &["7.0.0", "7.1.0"]);
-        let db = DbEntry {
-            runner_version_min: Some(Version::parse("8.0.0").unwrap()),
-            ..Default::default()
-        };
-        let identity = make_identity();
-
-        let result = DecisionEngine::select_runner(&[], Some(&db), &manifest, &identity);
-        assert!(
-            matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
-            "expected NoRunnerAvailable when all versions below floor, got: {result:?}"
-        );
-    }
-
-    #[test]
     fn select_runner_empty_manifest_returns_error() {
         let manifest = RunnersManifest { runners: vec![] };
         let identity = make_identity();
 
-        let result = DecisionEngine::select_runner(&[], None, &manifest, &identity);
+        let result = DecisionEngine::select_runner(&[], &manifest, &identity);
         assert!(
             matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
             "expected NoRunnerAvailable on empty manifest, got: {result:?}"

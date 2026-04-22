@@ -5,16 +5,10 @@ use std::path::PathBuf;
 
 use play_core::models::environment::*;
 use play_core::models::plan::*;
-use play_core::modules::database_client::{FixtureReader, NoopDatabaseReader};
 use play_core::modules::planning::PlanningModule;
-
-fn fixture_db() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/db")
-}
 
 fn planning_module() -> PlanningModule {
     PlanningModule::new(
-        fixture_db(),
         PathBuf::from("/tmp/play-test-runners"),
         PathBuf::from("/tmp/play-test-prefixes"),
     )
@@ -159,8 +153,7 @@ fn base_env(dx: DirectXVersion, pe_arch: PeArchitecture) -> GameEnvironment {
 fn full_plan_d3d9_pipewire_nvidia_laptop() {
     let env = base_env(DirectXVersion::D3D9, PeArchitecture::X86_64);
     let module = planning_module();
-    let db = FixtureReader::new(fixture_db());
-    let plan = module.plan_with_reader(&env, &db).unwrap();
+    let plan = module.plan(&env).unwrap();
 
     assert!(plan.hard_blocks.is_empty(), "unexpected hard blocks: {:?}", plan.hard_blocks);
     assert_eq!(plan.env.graphics.translation_layer, TranslationLayer::Dxvk);
@@ -174,11 +167,10 @@ fn full_plan_d3d9_pipewire_nvidia_laptop() {
 fn full_plan_d3d12_selects_vkd3d() {
     let env = base_env(DirectXVersion::D3D12, PeArchitecture::X86_64);
     let module = planning_module();
-    let db = NoopDatabaseReader::with_manifest(load_fixture_manifest());
-    let plan = module.plan_with_reader(&env, &db).unwrap();
+    let plan = module.plan(&env).unwrap();
 
     assert_eq!(plan.env.graphics.translation_layer, TranslationLayer::Vkd3dProton);
-    assert!(!plan.db_hit);
+    assert!(!plan.db_hit, "db_hit should be false in local mode");
 }
 
 #[test]
@@ -187,8 +179,7 @@ fn eac_hard_block_short_circuits() {
     env.identity.anti_cheat = vec![AntiCheat::EasyAntiCheat { linux_supported: false }];
 
     let module = planning_module();
-    let db = NoopDatabaseReader::with_manifest(load_fixture_manifest());
-    let plan = module.plan_with_reader(&env, &db).unwrap();
+    let plan = module.plan(&env).unwrap();
 
     assert!(!plan.hard_blocks.is_empty(), "EAC hard block must be recorded");
     assert!(plan.hard_blocks[0].contains("EasyAntiCheat"));
@@ -198,10 +189,9 @@ fn eac_hard_block_short_circuits() {
 fn plan_is_deterministic() {
     let env = base_env(DirectXVersion::D3D9, PeArchitecture::X86_64);
     let module = planning_module();
-    let db = NoopDatabaseReader::with_manifest(load_fixture_manifest());
 
-    let plan1 = module.plan_with_reader(&env, &db).unwrap();
-    let plan2 = module.plan_with_reader(&env, &db).unwrap();
+    let plan1 = module.plan(&env).unwrap();
+    let plan2 = module.plan(&env).unwrap();
 
     // Compare key fields — GamePlan doesn't derive PartialEq (contains PathBuf etc.)
     assert_eq!(plan1.env.graphics.translation_layer, plan2.env.graphics.translation_layer);
@@ -218,8 +208,7 @@ fn laptop_gpu_has_no_class_c_tweaks_applied() {
     assert!(env.hardware.gpu.is_laptop_gpu);
 
     let module = planning_module();
-    let db = NoopDatabaseReader::with_manifest(load_fixture_manifest());
-    let plan = module.plan_with_reader(&env, &db).unwrap();
+    let plan = module.plan(&env).unwrap();
 
     for tweak in &plan.tweaks {
         if tweak.class == TweakClass::C {
@@ -233,28 +222,21 @@ fn laptop_gpu_has_no_class_c_tweaks_applied() {
 }
 
 #[test]
-fn db_entry_dll_overrides_merged() {
-    let mut env = base_env(DirectXVersion::D3D9, PeArchitecture::X86_64);
-    env.identity.exe_hash =
-        "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab".to_owned();
+fn no_db_entry_local_mode() {
+    // In local mode, db_hit is always false since play-db is disabled
+    let env = base_env(DirectXVersion::D3D9, PeArchitecture::X86_64);
 
     let module = planning_module();
-    let db = FixtureReader::new(fixture_db());
-    let plan = module.plan_with_reader(&env, &db).unwrap();
+    let plan = module.plan(&env).unwrap();
 
-    assert!(plan.db_hit, "DB hit expected for fixture hash");
-    assert!(
-        plan.env.prefix.dll_overrides.iter().any(|o| o.dll == "d3d9"),
-        "fixture DLL override (d3d9) should be in plan"
-    );
+    assert!(!plan.db_hit, "db_hit should be false in local mode (play-db disabled)");
 }
 
 #[test]
 fn decisions_are_non_empty() {
     let env = base_env(DirectXVersion::D3D11, PeArchitecture::X86_64);
     let module = planning_module();
-    let db = NoopDatabaseReader::with_manifest(load_fixture_manifest());
-    let plan = module.plan_with_reader(&env, &db).unwrap();
+    let plan = module.plan(&env).unwrap();
 
     assert!(
         plan.env.metadata.decisions.len() >= 6,
@@ -268,8 +250,7 @@ fn mangohud_warning_present_when_not_configured() {
     let env = base_env(DirectXVersion::D3D9, PeArchitecture::X86_64);
     // env.graphics.mangohud is None by default.
     let module = planning_module();
-    let db = NoopDatabaseReader::with_manifest(load_fixture_manifest());
-    let plan = module.plan_with_reader(&env, &db).unwrap();
+    let plan = module.plan(&env).unwrap();
 
     assert!(
         plan.warnings.iter().any(|w| w.message.contains("MangoHud")),
@@ -284,9 +265,3 @@ fn mangohud_warning_present_when_not_configured() {
 // -----------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------
-
-fn load_fixture_manifest() -> play_core::models::plan::RunnersManifest {
-    let path = fixture_db().join("runners.toml");
-    let raw = std::fs::read_to_string(path).unwrap();
-    toml::from_str(&raw).unwrap()
-}

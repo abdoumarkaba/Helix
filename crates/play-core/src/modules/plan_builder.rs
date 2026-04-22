@@ -5,22 +5,23 @@
 /// Nothing is written to the filesystem here.
 use std::path::PathBuf;
 
+use tracing::info;
+
 use crate::models::environment::{
     GameEnvironment, ResolutionDecision, SystemTuning, TranslationLayer,
 };
 use crate::models::errors::PlayError;
 use crate::models::plan::{
-    DbEntry, GamePlan, LaunchAction, PlanWarning, PlannedTweak, RequiredPackage, RunnersManifest,
+    GamePlan, LaunchAction, PlanWarning, PlannedTweak, RequiredPackage, RunnersManifest,
     TweakDecision, TweakId,
 };
 
-use super::database_client::DatabaseReader;
 use super::decision_engine::DecisionEngine;
 use super::tweak_registry;
 
 pub struct PlanBuilder<'a> {
     env: &'a GameEnvironment,
-    db: &'a dyn DatabaseReader,
+    manifest: &'a RunnersManifest,
     prefix_root: PathBuf,
     runners_install_root: PathBuf,
 }
@@ -28,11 +29,11 @@ pub struct PlanBuilder<'a> {
 impl<'a> PlanBuilder<'a> {
     pub fn new(
         env: &'a GameEnvironment,
-        db: &'a dyn DatabaseReader,
+        manifest: &'a RunnersManifest,
         prefix_root: PathBuf,
         runners_install_root: PathBuf,
     ) -> Self {
-        Self { env, db, prefix_root, runners_install_root }
+        Self { env, manifest, prefix_root, runners_install_root }
     }
 
     /// Build the GamePlan. Pure: no filesystem writes, no system calls.
@@ -41,62 +42,70 @@ impl<'a> PlanBuilder<'a> {
         let mut hard_blocks: Vec<String> = Vec::new();
         let mut decisions: Vec<ResolutionDecision> = Vec::new();
 
-        // --- 1. Load DB entry ---
-        let db_entry: Option<DbEntry> = self.db.lookup(&self.env.identity.exe_hash)?;
-        let db_hit = db_entry.is_some();
-
-        // --- 2. Load runner manifest ---
-        let manifest: RunnersManifest = self.db.load_runners_manifest()?;
-
-        // --- 3. Hard block check ---
+        // --- 1. Hard block check ---
+        info!("Checking hard blocks...");
         if let Err(e) = DecisionEngine::check_hard_blocks(&self.env.identity.anti_cheat) {
             hard_blocks.push(e.to_string());
+            info!("Hard block found: {}", e);
             // Return early plan with hard block — Orchestrator will not proceed.
-            return Ok(self.early_fail_plan(hard_blocks, db_hit));
+            return Ok(self.early_fail_plan(hard_blocks, false));
         }
+        info!("No hard blocks found");
 
         // --- 4. Translation layer ---
+        info!("Selecting translation layer...");
         let (translation_layer, dec) =
             DecisionEngine::select_translation_layer(self.env.identity.dx_version);
+        info!("Translation layer: {:?}", translation_layer);
         decisions.push(dec);
 
         // --- 5. DXVK async ---
-        let (async_compile, dec) =
-            DecisionEngine::configure_dxvk_async(&self.env.identity.anti_cheat, db_entry.as_ref());
+        info!("Configuring DXVK async...");
+        let (async_compile, dec) = DecisionEngine::configure_dxvk_async(&self.env.identity.anti_cheat);
+        info!("DXVK async: {}", async_compile);
         decisions.push(dec);
 
         // --- 6. Runner ---
+        info!("Selecting runner...");
+        let db_hit = false; // No play-db in local mode
         let (runner_type, runner_version, dec) = DecisionEngine::select_runner(
             &self.env.identity.anti_cheat,
-            db_entry.as_ref(),
-            &manifest,
+            self.manifest,
             &self.env.identity,
         )?;
+        info!("Runner: {:?} {}", runner_type, runner_version);
         decisions.push(dec);
 
+        info!("Resolving runner action...");
         let runner_action = DecisionEngine::resolve_runner_action(
             runner_type,
             &runner_version,
-            &manifest,
+            self.manifest,
             &self.runners_install_root,
         )?;
 
         // --- 7. Sync mode ---
+        info!("Selecting sync mode...");
         let (fsync, esync, dec) = DecisionEngine::select_sync_mode(&self.env.hardware.kernel);
+        info!("Sync: fsync={}, esync={}", fsync, esync);
         decisions.push(dec);
 
         // --- 8. Audio driver ---
+        info!("Selecting audio driver...");
         let (wine_driver, dec) = DecisionEngine::select_audio_driver(self.env.audio.backend);
+        info!("Audio driver: {:?}", wine_driver);
         decisions.push(dec);
 
         // --- 9. Prefix arch + Windows version ---
+        info!("Selecting prefix configuration...");
         let (prefix_arch, dec) = DecisionEngine::select_prefix_arch(self.env.identity.pe_arch);
         decisions.push(dec);
 
-        let (windows_version, dec) =
-            DecisionEngine::select_windows_version(db_entry.as_ref(), self.env.identity.dx_version);
+        let (windows_version, dec) = DecisionEngine::select_windows_version(self.env.identity.dx_version);
+        info!("Prefix: {:?}, Windows: {:?}", prefix_arch, windows_version);
         decisions.push(dec);
 
+        info!("Resolving prefix action...");
         let (prefix_action, dec) = DecisionEngine::resolve_prefix_action(
             &self.prefix_root,
             &self.env.identity.exe_hash,
@@ -106,12 +115,18 @@ impl<'a> PlanBuilder<'a> {
         decisions.push(dec);
 
         // --- 10. Tweaks ---
+        info!("Resolving tweaks...");
         let tweaks = self.resolve_tweaks(&mut warnings, fsync, esync, async_compile);
+        let applied_count = tweaks.iter().filter(|t| matches!(t.decision, TweakDecision::Apply(_))).count();
+        info!("Applied {} tweaks", applied_count);
 
         // --- 11. Required packages ---
+        info!("Computing required packages...");
         let required_packages = self.compute_required_packages(&translation_layer, &mut warnings);
+        info!("Required packages: {}", required_packages.len());
 
         // --- 12. Build resolved GameEnvironment ---
+        info!("Building resolved environment...");
         let mut env = self.env.clone();
 
         // Fill graphics
@@ -132,17 +147,7 @@ impl<'a> PlanBuilder<'a> {
         env.prefix.arch = prefix_arch;
         env.prefix.windows_version = windows_version;
 
-        // Merge DB dll_overrides and env_vars
-        if let Some(ref db) = db_entry {
-            for ov in &db.dll_overrides {
-                if !env.prefix.dll_overrides.iter().any(|o| o.dll == ov.dll) {
-                    env.prefix.dll_overrides.push(ov.clone());
-                }
-            }
-            for (k, v) in &db.extra_env_vars {
-                env.prefix.env_vars.insert(k.clone(), v.clone());
-            }
-        }
+        // No play-db integration - use heuristic defaults only
 
         // Fill system tuning
         for t in &tweaks {
@@ -168,15 +173,12 @@ impl<'a> PlanBuilder<'a> {
             }
         }
 
+        // Log completion stats before moving decisions
+        info!("Plan complete: {} decisions, {} tweaks, {} warnings", decisions.len(), tweaks.len(), warnings.len());
+
         // Record all decisions in metadata
         env.metadata.decisions = decisions;
-        if db_hit {
-            env.metadata.resolution_source =
-                crate::models::environment::ResolutionSource::DatabaseAssisted {
-                    entry_id: env.identity.exe_hash.clone(),
-                    confidence: 0.8,
-                };
-        }
+        env.metadata.resolution_source = crate::models::environment::ResolutionSource::FullyAutomatic;
 
         // --- 13. Build launch action ---
         let exe_path = env.identity.exe_path.clone();
@@ -203,7 +205,7 @@ impl<'a> PlanBuilder<'a> {
             prefix_action,
             launch_action,
             tweaks,
-            db_hit,
+            db_hit, // Set to false at line 60 (no play-db in local mode)
         })
     }
 

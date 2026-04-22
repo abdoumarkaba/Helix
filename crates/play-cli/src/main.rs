@@ -4,7 +4,6 @@
 //! and post-session metrics/reporting workflows.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use chrono::Utc;
 use clap::{CommandFactory, Parser};
@@ -42,10 +41,6 @@ struct CliArgs {
     /// Rollback previous session for this game
     #[arg(long)]
     undo: bool,
-
-    /// Update play-db to latest
-    #[arg(long)]
-    update_db: bool,
 
     /// Enable verbose tracing output
     #[arg(long, short)]
@@ -187,7 +182,7 @@ fn display_error_with_context(
     match error {
         PlayError::RunnerDownload { .. } => {
             eprintln!("    1. Check your internet connection");
-            eprintln!("    2. Run {} to refresh runner manifest", style("play --update-db").cyan());
+            eprintln!("    2. Verify the runner URL is accessible");
             eprintln!(
                 "    3. Try again: {}",
                 style(format!("play {}", exe_path.display())).cyan()
@@ -226,9 +221,9 @@ fn display_error_with_context(
             );
         },
         PlayError::NoRunnerAvailable { .. } => {
-            eprintln!("    1. Run {} to refresh runner manifest", style("play --update-db").cyan());
-            eprintln!("    2. Check play-db for available runners");
-            eprintln!("    3. Try a different game or wait for runner update");
+            eprintln!("    1. Check that ProtonGE runners are installed");
+            eprintln!("    2. Install required tools (pciutils, vulkan-tools)");
+            eprintln!("    3. Try a different game or check runner compatibility");
         },
         PlayError::UnsupportedDistro { .. } => {
             eprintln!("    1. Check if your distro is supported");
@@ -262,62 +257,6 @@ fn display_error_with_context(
 #[allow(dead_code)]
 fn show_log_path(_log_path: &Path) {
     // Log path is now shown at startup, but keep this for potential future use
-}
-
-// ---------------------------------------------------------------------------
-// Update DB
-// ---------------------------------------------------------------------------
-
-fn update_db() -> Result<(), PlayError> {
-    let db_dir =
-        data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("db");
-
-    info!(event = "update_db_start", path = %db_dir.display(), "Updating play-db");
-
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg}")
-            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
-    );
-    pb.set_message("Updating play-db...");
-
-    // Check if directory exists and has .git
-    let git_dir = db_dir.join(".git");
-    let result = if git_dir.exists() {
-        // Pull latest
-        Command::new("git")
-            .args(["-C", &db_dir.to_string_lossy(), "pull", "origin", "main"])
-            .output()
-    } else {
-        // Clone fresh
-        std::fs::create_dir_all(&db_dir).map_err(|e| PlayError::DatabaseUpdateFailed {
-            reason: format!("Failed to create db directory: {e}"),
-        })?;
-        Command::new("git")
-            .args(["clone", "https://github.com/abdoumarkt/play-db.git", &db_dir.to_string_lossy()])
-            .output()
-    };
-
-    pb.finish_and_clear();
-
-    match result {
-        Ok(output) => {
-            if output.status.success() {
-                info!(event = "update_db_complete", "play-db updated successfully");
-                println!("{}", style("✓ play-db updated successfully").green());
-                Ok(())
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                Err(PlayError::DatabaseUpdateFailed {
-                    reason: format!("git command failed: {stderr}"),
-                })
-            }
-        },
-        Err(e) => {
-            Err(PlayError::DatabaseUpdateFailed { reason: format!("Failed to run git: {e}") })
-        },
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -431,10 +370,6 @@ fn get_prefix_root() -> PathBuf {
     data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("prefixes")
 }
 
-fn get_db_root() -> PathBuf {
-    data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("db")
-}
-
 fn create_orchestrator(
     cmd_runner: Box<dyn play_core::modules::detection::CommandRunner>,
 ) -> Orchestrator {
@@ -442,13 +377,7 @@ fn create_orchestrator(
     let games_root =
         data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games");
 
-    Orchestrator::new(
-        games_root,
-        get_runners_root(),
-        get_prefix_root(),
-        get_db_root(),
-        cmd_runner,
-    )
+    Orchestrator::new(games_root, get_runners_root(), get_prefix_root(), cmd_runner)
 }
 
 // ---------------------------------------------------------------------------
@@ -505,16 +434,6 @@ fn main() {
 
     // Now setup tracing with exe_path for per-run log file naming
     let log_dir = setup_tracing(args.verbose, Some(&exe_path));
-
-    // Handle --update-db after logging is set up
-    if args.update_db {
-        if let Err(e) = update_db() {
-            error!(event = "update_db_failed", error = %e, "Failed to update play-db");
-            eprintln!("{} {}", style("Error:").red().bold(), e);
-            std::process::exit(1);
-        }
-        return;
-    }
 
     // Validate executable exists
     if !exe_path.exists() {
@@ -714,12 +633,6 @@ mod tests {
         let args = vec!["play", "--yes", "game.exe"];
         let parsed = CliArgs::parse_from(args);
         assert!(parsed.yes);
-
-        // Test utility flags without exe_path
-        let args = vec!["play", "--update-db"];
-        let parsed = CliArgs::parse_from(args);
-        assert!(parsed.update_db);
-        assert!(parsed.exe_path.is_none());
     }
 
 }

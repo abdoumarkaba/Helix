@@ -63,28 +63,10 @@ pub enum PlayError {
     InsufficientVram { required_mb: u32, available_mb: u32 },
 
     #[error(
-        "play-db entry for {hash} is corrupted: {reason}. \
-         Delete the entry and run `play --update-db`."
-    )]
-    DatabaseCorrupted { hash: String, reason: String },
-
-    #[error("runners.toml not found at {path}. Run `play --update-db` to fetch it.")]
-    RunnersManifestMissing { path: PathBuf },
-
-    #[error(
         "No {runner_type} runner satisfies version floor {version_min}. \
-         Run `play --update-db` to refresh the runner manifest."
+         Check that runners are installed or install required tools."
     )]
     NoRunnerAvailable { runner_type: String, version_min: String },
-
-    #[error("Failed to read DB entry at {path}: {reason}")]
-    DbEntryReadFailed { path: PathBuf, reason: String },
-
-    #[error("Failed to read runners.toml at {path}: {reason}")]
-    RunnersManifestReadFailed { path: PathBuf, reason: String },
-
-    #[error("runners.toml parse error at {path}: {reason}")]
-    RunnersManifestParseFailed { path: PathBuf, reason: String },
 
     #[error("CPU governor write failed for core {core}: {reason}")]
     GovernorWrite { core: String, reason: String },
@@ -100,9 +82,6 @@ pub enum PlayError {
 
     #[error("Validation failed: {reason}")]
     ValidationFailed { reason: String },
-
-    #[error("Database update failed: {reason}")]
-    DatabaseUpdateFailed { reason: String },
 
     #[error("Failed to launch game at {exe_path}: {reason}")]
     GameLaunchFailed { exe_path: PathBuf, reason: String },

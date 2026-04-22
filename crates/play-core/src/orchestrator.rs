@@ -165,8 +165,6 @@ pub struct Orchestrator {
     runners_root: PathBuf,
     /// Prefix directory.
     prefix_root: PathBuf,
-    /// Database root.
-    db_root: PathBuf,
     /// Current phase.
     phase: OrchestratorPhase,
     /// The game environment being built up.
@@ -219,13 +217,11 @@ impl Orchestrator {
     /// - `state_root`: Directory for checkpoints (~/.local/share/play/games/). Temp dir created inside.
     /// - `runners_root`: Directory for installed runners.
     /// - `prefix_root`: Directory for Wine prefixes.
-    /// - `db_root`: Directory for play-db cache.
     /// - `cmd_runner`: Injectable command runner for testability.
     pub fn new(
         state_root: PathBuf,
         runners_root: PathBuf,
         prefix_root: PathBuf,
-        db_root: PathBuf,
         cmd_runner: Box<dyn CommandRunner>,
     ) -> Self {
         // Use a temporary state directory name until detection gives us the real SHA256
@@ -240,7 +236,6 @@ impl Orchestrator {
             state_root: game_state_root,
             runners_root,
             prefix_root,
-            db_root,
             phase: OrchestratorPhase::Initialized,
             env: None,
             plan: None,
@@ -262,7 +257,6 @@ impl Orchestrator {
         state_root: PathBuf,
         runners_root: PathBuf,
         prefix_root: PathBuf,
-        db_root: PathBuf,
         cmd_runner: Box<dyn CommandRunner>,
     ) -> Self {
         Self {
@@ -273,7 +267,6 @@ impl Orchestrator {
             state_root,
             runners_root,
             prefix_root,
-            db_root,
             phase: OrchestratorPhase::Initialized,
             env: None,
             plan: None,
@@ -472,21 +465,12 @@ impl Orchestrator {
         self.report_progress("Planning configuration...");
         info!(event = "phase_start", phase = "planning", "Starting planning phase");
 
-        // NOTE: play-db disabled for local testing
-        // TODO: Re-enable when play-db is ready
-        // let runners_toml = self.db_root.join("runners.toml");
-        // if !runners_toml.exists() { ... }
-
         let env = self.env.as_ref().ok_or_else(|| PlayError::OrchestratorFailed {
             phase: "planning".to_string(),
             reason: "no environment in planning phase".to_string(),
         })?;
 
-        let planning = PlanningModule::new(
-            self.db_root.clone(),
-            self.runners_root.clone(),
-            self.prefix_root.clone(),
-        );
+        let planning = PlanningModule::new(self.runners_root.clone(), self.prefix_root.clone());
 
         let plan = planning.plan(env)?;
 

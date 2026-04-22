@@ -352,7 +352,15 @@ pub fn detect_memory(proc_root: &Path) -> MemoryProfile {
 /// Detect GPU from lspci (best method, gives vendor:device IDs).
 /// Returns None if lspci is not available or no GPU found.
 pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
-    let output = cmd_runner.run_command("lspci", &["-mm"]).ok()?;
+    info!("Attempting lspci detection...");
+
+    let output = match cmd_runner.run_command("lspci", &["-mm"]) {
+        Ok(out) => out,
+        Err(e) => {
+            info!("lspci failed or no GPU found: {e}");
+            return None;
+        }
+    };
 
     let mut gpu_vendor = GpuVendor::Unknown;
     let mut gpu_model = String::from("Unknown GPU");
@@ -413,7 +421,15 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
 /// Detect GPU from vulkaninfo (fallback method, gives Vulkan info).
 /// Returns None if vulkaninfo is not available.
 pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
-    let output = cmd_runner.run_command("vulkaninfo", &["--summary"]).ok()?;
+    info!("Attempting vulkaninfo detection...");
+
+    let output = match cmd_runner.run_command("vulkaninfo", &["--summary"]) {
+        Ok(out) => out,
+        Err(e) => {
+            info!("vulkaninfo failed: {e}");
+            return None;
+        }
+    };
 
     let mut gpu_vendor = GpuVendor::Unknown;
     let mut gpu_model = String::from("Unknown GPU");
@@ -468,10 +484,17 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
 /// Detect NVIDIA GPU from nvidia-smi (most reliable on NVIDIA systems).
 /// Returns None if nvidia-smi is not available or no NVIDIA GPU found.
 pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
+    info!("Attempting nvidia-smi detection...");
+
     // Query GPU name, VRAM, and driver version
-    let output = cmd_runner
-        .run_command("nvidia-smi", &["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"])
-        .ok()?;
+    let output = match cmd_runner
+        .run_command("nvidia-smi", &["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"]) {
+        Ok(out) => out,
+        Err(e) => {
+            info!("nvidia-smi not available or failed: {e}");
+            return None;
+        }
+    };
 
     let parts: Vec<&str> = output.trim().split(',').collect();
     if parts.len() >= 3 {
@@ -527,15 +550,16 @@ pub fn detect_gpu_with_fallbacks(cmd_runner: &dyn CommandRunner) -> GpuProfile {
     if let Some(gpu) = detect_gpu_lspci(cmd_runner) {
         return gpu;
     }
-    warn!("lspci failed or no GPU found, trying vulkaninfo...");
 
     // Try vulkaninfo as fallback
     if let Some(gpu) = detect_gpu_vulkaninfo(cmd_runner) {
         return gpu;
     }
-    warn!("vulkaninfo failed, using safe GPU defaults");
 
     // All methods failed - use safe defaults
+    warn!("All GPU detection methods failed (nvidia-smi, lspci, vulkaninfo). Using safe defaults.");
+    warn!("Install pciutils for GPU detection: sudo dnf install pciutils");
+    warn!("Install vulkan-tools for GPU detection: sudo dnf install vulkan-tools");
     info!(vendor = ?GpuVendor::Unknown, method = "fallback", "gpu detection");
 
     GpuProfile {
@@ -617,9 +641,14 @@ pub fn enrich_intel_gpu(_gpu: &mut GpuProfile) {
 /// Queries the actual server sample rate instead of hardcoding 48000.
 pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
     // Check for PipeWire
+    info!("Checking for PipeWire via wpctl...");
     if cmd_runner.run_command("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"]).is_ok() {
-        let rate = parse_pipewire_rate(cmd_runner).unwrap_or(48000);
-        info!("audio backend: PipeWire detected, rate={rate}");
+        info!("wpctl succeeded, parsing rate via pw-dump...");
+        let rate = parse_pipewire_rate(cmd_runner).unwrap_or_else(|| {
+            info!("Failed to parse rate from pw-dump, using default 48000");
+            48000
+        });
+        info!("Successfully detected PipeWire with rate: {rate}");
         return AudioConfig {
             backend: AudioBackend::PipeWire,
             server_rate: rate,
@@ -629,9 +658,13 @@ pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
     }
 
     // Check for PulseAudio
+    info!("Checking for PulseAudio via pactl...");
     if cmd_runner.run_command("pactl", &["get-sink-volume", "@DEFAULT_SINK@"]).is_ok() {
-        let rate = parse_pulse_rate(cmd_runner).unwrap_or(48000);
-        info!("audio backend: PulseAudio detected, rate={rate}");
+        let rate = parse_pulse_rate(cmd_runner).unwrap_or_else(|| {
+            info!("Failed to parse rate from pactl, using default 48000");
+            48000
+        });
+        info!("Successfully detected PulseAudio with rate: {rate}");
         return AudioConfig {
             backend: AudioBackend::PulseAudio,
             server_rate: rate,
@@ -641,7 +674,8 @@ pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
     }
 
     // Default to ALSA
-    warn!("audio backend: defaulting to ALSA");
+    info!("Defaulting to ALSA");
+    warn!("Install PipeWire tools for better audio: sudo dnf install pipewire wireplumber");
     AudioConfig {
         backend: AudioBackend::ALSA,
         server_rate: 48000,
@@ -652,20 +686,34 @@ pub fn detect_audio(cmd_runner: &dyn CommandRunner) -> AudioConfig {
 
 /// Try to parse the default sample rate from `pw-dump` (PipeWire).
 fn parse_pipewire_rate(cmd_runner: &dyn CommandRunner) -> Option<u32> {
-    let output = cmd_runner.run_command("pw-dump", &[]).ok()?;
-    // Look for "rate": <number> in JSON-like output
+    let output = match cmd_runner.run_command("pw-dump", &[]) {
+        Ok(out) => {
+            // Log first 200 chars of output for debugging
+            let snippet = if out.len() > 200 { &out[..200] } else { &out };
+            info!("pw-dump output: {snippet}...");
+            out
+        }
+        Err(e) => {
+            info!("pw-dump failed: {e}");
+            return None;
+        }
+    };
+
+    // Look for "rate": <number> in JSON output
     for line in output.lines() {
-        if let Some(rate) = line.split('"').nth(1).and_then(|_| {
-            // Find "rate": <number> pattern
-            if line.contains("\"rate\"") {
-                line.split(':').nth(1).and_then(|v| v.trim().trim_end_matches(',').parse().ok())
-            } else {
-                None
+        if line.contains("\"rate\"") {
+            if let Some(rate_str) = line.split(':').nth(1) {
+                let rate_str = rate_str.trim().trim_end_matches(',');
+                match rate_str.parse::<u32>() {
+                    Ok(rate) => return Some(rate),
+                    Err(e) => {
+                        info!("Failed to parse rate value '{rate_str}': {e}");
+                    }
+                }
             }
-        }) {
-            return Some(rate);
         }
     }
+    info!("No rate field found in pw-dump output");
     None
 }
 
