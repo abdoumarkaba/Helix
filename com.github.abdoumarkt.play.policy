@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig-1.dtd">
+<policyconfig>
+  <vendor>Just Play</vendor>
+  <vendor_url>https://github.com/abdoumarkt/Just-Play</vendor_url>
+
+  <action id="com.github.abdoumarkt.play.sysctl-write">
+    <description>Write sysctl values for game optimization</description>
+    <message>Authentication is required to modify kernel parameters for gaming performance</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/play-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">sysctl-write</annotate>
+  </action>
+
+  <action id="com.github.abdoumarkt.play.sysfs-write">
+    <description>Write sysfs values for game optimization</description>
+    <message>Authentication is required to modify sysfs parameters for gaming performance</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/play-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">sysfs-write</annotate>
+  </action>
+
+  <action id="com.github.abdoumarkt.play.write-file">
+    <description>Write system configuration files for game optimization</description>
+    <message>Authentication is required to modify system configuration for gaming performance</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/play-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">write-file</annotate>
+  </action>
+</policyconfig>

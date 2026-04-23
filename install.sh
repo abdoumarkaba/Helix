@@ -47,11 +47,30 @@ cd "$TMP_DIR"
 curl -fsSL "$DOWNLOAD_URL" -o play.tar.gz
 tar xzf play.tar.gz
 
-# Install
+# Install main binary
 echo "Installing to ${INSTALL_DIR}/play..."
 mkdir -p "$INSTALL_DIR"
 mv play "$INSTALL_DIR/play"
 chmod +x "$INSTALL_DIR/play"
+
+# Install play-helper if present in the archive
+if [ -f "play-helper" ]; then
+  echo "Installing play-helper to ${INSTALL_DIR}/play-helper..."
+  mv play-helper "$INSTALL_DIR/play-helper"
+  chmod +x "$INSTALL_DIR/play-helper"
+fi
+
+# Install polkit policy if present (requires sudo for system-wide install)
+if [ -f "com.github.abdoumarkt.play.policy" ]; then
+  POLICY_DIR="/usr/share/polkit-1/actions"
+  if [ -w "$POLICY_DIR" ] || [ "$EUID" -eq 0 ]; then
+    echo "Installing polkit policy to ${POLICY_DIR}..."
+    mv com.github.abdoumarkt.play.policy "$POLICY_DIR/"
+  else
+    echo "Installing polkit policy (requires sudo)..."
+    sudo mv com.github.abdoumarkt.play.policy "$POLICY_DIR/"
+  fi
+fi
 
 # Cleanup
 cd -
@@ -68,6 +87,9 @@ echo "Verifying installation..."
 if "$INSTALL_DIR/play" --version > /dev/null 2>&1; then
   echo ""
   echo "Done! Run 'play --help' to get started."
+  echo ""
+  echo "Note: System tweaks require polkit authentication."
+  echo "      You will be prompted for your password when needed."
 else
   echo ""
   echo "Warning: Installation verification failed"

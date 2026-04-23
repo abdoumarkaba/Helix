@@ -168,11 +168,16 @@ impl SystemModule {
         }
     }
 
-    /// Write a sysctl value via play-helper.
+    /// Write a sysctl value via pkexec play-helper.
+    /// Prompts user for password via polkit if needed.
     /// Logs warning instead of failing for development/testing without proper privileges.
     fn write_sysctl(&self, key: &str, value: &str) -> Result<(), PlayError> {
-        match self.cmd_runner.run_command("play-helper", &["sysctl-write", key, value]) {
-            Ok(_) => Ok(()),
+        // Try with pkexec for privilege escalation via polkit
+        match self.cmd_runner.run_command("pkexec", &["play-helper", "sysctl-write", key, value]) {
+            Ok(_) => {
+                tracing::info!("Sysctl {} = {} applied successfully", key, value);
+                Ok(())
+            },
             Err(e) => {
                 // Log warning but don't fail - allows testing without play-helper privileges
                 tracing::warn!("Sysctl write to {} failed (requires elevated helper): {}", key, e);
@@ -182,11 +187,16 @@ impl SystemModule {
         }
     }
 
-    /// Write a sysfs file via play-helper.
+    /// Write a sysfs file via pkexec play-helper.
+    /// Prompts user for password via polkit if needed.
     /// Logs warning instead of failing for development/testing without proper privileges.
     fn write_sysfs_file(&self, path: &str, value: &str) -> Result<(), PlayError> {
-        match self.cmd_runner.run_command("play-helper", &["sysfs-write", path, value]) {
-            Ok(_) => Ok(()),
+        // Try with pkexec for privilege escalation via polkit
+        match self.cmd_runner.run_command("pkexec", &["play-helper", "sysfs-write", path, value]) {
+            Ok(_) => {
+                tracing::info!("Sysfs {} = {} applied successfully", path, value);
+                Ok(())
+            },
             Err(e) => {
                 // Log warning but don't fail - allows testing without play-helper privileges
                 tracing::warn!("Sysfs write to {} failed (requires elevated helper): {}", path, e);
@@ -196,15 +206,19 @@ impl SystemModule {
         }
     }
 
-    /// Write to /etc/security/limits.d/play.conf via play-helper.
+    /// Write to /etc/security/limits.d/play.conf via pkexec play-helper.
+    /// Prompts user for password via polkit if needed.
     /// Logs warning instead of failing for development/testing without proper privileges.
     fn write_limits_d(&self, value: u64) -> Result<(), PlayError> {
         let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
         match self.cmd_runner.run_command(
-            "play-helper",
-            &["write-file", "/etc/security/limits.d/play.conf", &content],
+            "pkexec",
+            &["play-helper", "write-file", "/etc/security/limits.d/play.conf", &content],
         ) {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                tracing::info!("Ulimit nofile = {} applied successfully", value);
+                Ok(())
+            },
             Err(e) => {
                 // Log warning but don't fail - allows testing without play-helper privileges
                 tracing::warn!("Sysctl write to ulimit-nofile failed (requires elevated helper): {}", e);
@@ -440,7 +454,8 @@ mod tests {
         assert!(!guards.is_active()); // Class B has no session guards
 
         let calls = runner.calls();
-        assert!(calls.iter().any(|c| c.0 == "play-helper" && c.1[0] == "sysctl-write"));
+        // Now uses pkexec for privilege escalation
+        assert!(calls.iter().any(|c| c.0 == "pkexec" && c.1[0] == "play-helper" && c.1[1] == "sysctl-write"));
     }
 
     #[test]
@@ -470,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_returns_error_on_failure() {
+    fn apply_gracefully_degrades_on_sysctl_failure() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("sys/devices/system/cpu/cpu0/cpufreq")).unwrap();
         std::fs::write(
@@ -479,11 +494,12 @@ mod tests {
         )
         .unwrap();
 
-        // Governor succeeds, but sysctl-write fails
+        // Governor succeeds, sysctl-write fails - but should gracefully degrade
         let runner = MockCommandRunner::new(vec![
             ("play-helper-sysfs-read".to_owned(), Ok("schedutil".to_owned())),
             ("play-helper-sysfs-write".to_owned(), Ok(String::new())),
-            ("play-helper-sysctl-write".to_owned(), Err("permission denied".to_owned())),
+            // pkexec play-helper returns error (simulating user cancel or failure)
+            ("pkexec-play-helper".to_owned(), Err("permission denied".to_owned())),
         ]);
         let module = SystemModule::new(dir.path().to_owned(), Box::new(runner));
 
@@ -503,9 +519,12 @@ mod tests {
             },
         ];
 
+        // Should NOT error - graceful degradation
         let result = module.apply(&tweaks, &hw);
-        assert!(result.is_err());
-        // Governor guard was applied then dropped on error path (restoring governor)
+        assert!(result.is_ok());
+        // Governor guard should still be active (not dropped due to graceful degradation)
+        let guards = result.unwrap();
+        assert!(guards.governor.is_some());
     }
 
     #[test]
