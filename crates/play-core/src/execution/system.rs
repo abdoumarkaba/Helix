@@ -163,17 +163,7 @@ impl SystemModule {
             },
 
             SystemTweak::UlimitNofile { value } => {
-                let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
-                self.cmd_runner
-                    .run_command(
-                        "play-helper",
-                        &["write-file", "/etc/security/limits.d/play.conf", &content],
-                    )
-                    .map_err(|e| PlayError::SysctlWrite {
-                        key: "ulimit-nofile".to_owned(),
-                        reason: format!("failed to write limits.d via play-helper: {e}"),
-                    })?;
-                Ok(())
+                self.write_limits_d(*value)
             },
         }
     }
@@ -200,6 +190,24 @@ impl SystemModule {
             Err(e) => {
                 // Log warning but don't fail - allows testing without play-helper privileges
                 tracing::warn!("Sysfs write to {} failed (requires elevated helper): {}", path, e);
+                tracing::warn!("Skipping system tweak - game may still work but with suboptimal performance");
+                Ok(())
+            }
+        }
+    }
+
+    /// Write to /etc/security/limits.d/play.conf via play-helper.
+    /// Logs warning instead of failing for development/testing without proper privileges.
+    fn write_limits_d(&self, value: u64) -> Result<(), PlayError> {
+        let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
+        match self.cmd_runner.run_command(
+            "play-helper",
+            &["write-file", "/etc/security/limits.d/play.conf", &content],
+        ) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // Log warning but don't fail - allows testing without play-helper privileges
+                tracing::warn!("Sysctl write to ulimit-nofile failed (requires elevated helper): {}", e);
                 tracing::warn!("Skipping system tweak - game may still work but with suboptimal performance");
                 Ok(())
             }

@@ -12,8 +12,8 @@ use crate::models::environment::{
 };
 use crate::models::errors::PlayError;
 use crate::models::plan::{
-    GamePlan, LaunchAction, PlanWarning, PlannedTweak, RequiredPackage, RunnersManifest,
-    TweakDecision, TweakId,
+    GamePlan, LaunchAction, PlanWarning, PlannedTweak, RequiredPackage, RunnerAction,
+    RunnersManifest, TweakDecision, TweakId,
 };
 
 use super::decision_engine::DecisionEngine;
@@ -84,6 +84,15 @@ impl<'a> PlanBuilder<'a> {
             &self.runners_install_root,
         )?;
 
+        // Extract runner path from runner_action for use in launch_action
+        let runner_install_path = match &runner_action {
+            RunnerAction::AlreadyInstalled { path } => path.clone(),
+            RunnerAction::Download { version, .. } => self
+                .runners_install_root
+                .join(format!("{runner_type:?}"))
+                .join(version.to_string()),
+        };
+
         // --- 7. Sync mode ---
         info!("Selecting sync mode...");
         let (fsync, esync, dec) = DecisionEngine::select_sync_mode(&self.env.hardware.kernel);
@@ -139,6 +148,7 @@ impl<'a> PlanBuilder<'a> {
         // Fill runner
         env.runner.runner_type = runner_type;
         env.runner.version = runner_version;
+        env.runner.install_path = runner_install_path;
 
         // Fill audio
         env.audio.wine_driver = wine_driver;
