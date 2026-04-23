@@ -93,9 +93,6 @@ impl<'a> PlanBuilder<'a> {
                 .join(version.to_string()),
         };
 
-        // Update env.runner.install_path with the resolved path
-        env.runner.install_path = runner_install_path.clone();
-
         // --- 7. Sync mode ---
         info!("Selecting sync mode...");
         let (fsync, esync, dec) = DecisionEngine::select_sync_mode(&self.env.hardware.kernel);
@@ -151,7 +148,7 @@ impl<'a> PlanBuilder<'a> {
         // Fill runner
         env.runner.runner_type = runner_type;
         env.runner.version = runner_version;
-        env.runner.install_path = runner_install_path;
+        env.runner.install_path = runner_install_path.clone();
 
         // Fill audio
         env.audio.wine_driver = wine_driver;
@@ -211,7 +208,7 @@ impl<'a> PlanBuilder<'a> {
             working_dir,
             args: Vec::new(), // TODO: Allow CLI args
             env: env.launch.env.clone(),
-            runner_path: env.runner.install_path.clone(),
+            runner_path: runner_install_path,
             runner_type: env.runner.runner_type,
         };
 

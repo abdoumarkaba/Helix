@@ -1,0 +1,9 @@
+cargo build --release
+sudo cp target/release/play /usr/local/bin/
+sudo cp target/release/play-helper /usr/local/bin/
+sudo cp com.github.abdoumarkt.play.policy /usr/share/polkit-1/actions/
+play /run/media/abdoufoundit/forgames/Games/RimWorld/RimWorldWin64.exe
+
+
+
+NEED CI/CD
