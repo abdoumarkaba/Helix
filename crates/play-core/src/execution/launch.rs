@@ -101,9 +101,27 @@ impl LaunchModule {
             .stderr(Stdio::piped());
 
         // Spawn the process
-        let mut child = cmd.spawn().map_err(|e| PlayError::GameLaunchFailed {
-            exe_path: exe_path.clone(),
-            reason: format!("failed to spawn process: {e}"),
+        let mut child = cmd.spawn().map_err(|e| {
+            let reason = if e.kind() == std::io::ErrorKind::PermissionDenied {
+                format!(
+                    "Permission denied. Possible fixes:\n\
+                     1. Check file permissions: ls -l {}\n\
+                     2. If on external drive, check mount options: mount | grep {}\n\
+                     3. If SELinux is active, check context: ls -Z {}\n\
+                     4. Try: chmod +x {}\n\
+                     Original error: {e}",
+                    exe_path.display(),
+                    exe_path.ancestors().nth(1).map(|p| p.display().to_string()).unwrap_or_else(|| "unknown".to_string()),
+                    exe_path.display(),
+                    exe_path.display()
+                )
+            } else {
+                format!("failed to spawn process: {e}")
+            };
+            PlayError::GameLaunchFailed {
+                exe_path: exe_path.clone(),
+                reason,
+            }
         })?;
 
         // Wait for process to stabilize

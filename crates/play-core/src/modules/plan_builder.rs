@@ -93,6 +93,9 @@ impl<'a> PlanBuilder<'a> {
                 .join(version.to_string()),
         };
 
+        // Update env.runner.install_path with the resolved path
+        env.runner.install_path = runner_install_path.clone();
+
         // --- 7. Sync mode ---
         info!("Selecting sync mode...");
         let (fsync, esync, dec) = DecisionEngine::select_sync_mode(&self.env.hardware.kernel);

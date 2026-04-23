@@ -153,6 +153,12 @@ impl SystemModule {
             },
 
             SystemTweak::SchedAutogroup { enabled } => {
+                // Check if kernel parameter exists (removed in some kernel versions)
+                let sysctl_path = "/proc/sys/kernel/sched_autogroup";
+                if !self.sysctl_exists(sysctl_path) {
+                    tracing::warn!("Kernel parameter {} does not exist on this system - skipping tweak", sysctl_path);
+                    return Ok(());
+                }
                 let val = if *enabled { "1" } else { "0" };
                 self.write_sysctl("kernel.sched_autogroup", val)
             },
@@ -226,6 +232,12 @@ impl SystemModule {
                 Ok(())
             }
         }
+    }
+
+    /// Check if a sysctl parameter exists in the filesystem.
+    /// Some kernel parameters may be removed or renamed in newer kernel versions.
+    fn sysctl_exists(&self, path: &str) -> bool {
+        std::path::Path::new(path).exists()
     }
 }
 
