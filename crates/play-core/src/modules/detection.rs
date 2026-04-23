@@ -648,8 +648,12 @@ pub fn enrich_nvidia_gpu(
         if let Ok(vram_mb) = parts[1].trim().parse::<u32>() {
             gpu.vram_mb = vram_mb;
         }
-        if let Ok(version) = Version::parse(parts[2].trim()) {
-            gpu.driver_version = version;
+        // Only parse driver version if not already set (from initial detection)
+        // NVIDIA driver versions like "580.142" don't match semver format
+        if gpu.driver_version == Version::new(0, 0, 0) {
+            if let Ok(version) = Version::parse(parts[2].trim()) {
+                gpu.driver_version = version;
+            }
         }
         gpu.driver_type = DriverType::NvidiaProprietary;
     }
