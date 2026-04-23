@@ -103,6 +103,7 @@ pub struct HardwareProfile {
     pub kernel: KernelProfile,
     pub display: DisplayProfile,
     pub distro: DistroInfo,
+    pub gaming_tools: GamingToolsProfile,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +238,21 @@ pub enum Distro {
     Debian,
     OpenSUSE,
     Unknown,
+}
+
+// ---------------------------------------------------------------------------
+// GamingToolsProfile
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GamingToolsProfile {
+    pub wine_installed: bool,
+    pub wine_version: Option<String>,
+    pub winetricks_installed: bool,
+    pub gamemode_installed: bool,
+    pub dxvk_installed: bool,
+    pub proton_available: bool,
+    pub vulkan_available: bool,
 }
 
 // ---------------------------------------------------------------------------

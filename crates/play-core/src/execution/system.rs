@@ -323,6 +323,15 @@ mod tests {
                 version_id: "22.04".to_owned(),
                 pretty_name: "Ubuntu 22.04".to_owned(),
             },
+            gaming_tools: crate::models::environment::GamingToolsProfile {
+                wine_installed: false,
+                wine_version: None,
+                winetricks_installed: false,
+                gamemode_installed: false,
+                dxvk_installed: false,
+                proton_available: false,
+                vulkan_available: false,
+            },
         }
     }
 

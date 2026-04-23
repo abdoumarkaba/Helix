@@ -315,14 +315,42 @@ impl<'a> PlanBuilder<'a> {
         layer: &TranslationLayer,
         _warnings: &mut Vec<PlanWarning>,
     ) -> Vec<RequiredPackage> {
-        // Wine is always required.
+        let mut packages = Vec::new();
+
+        // Check wine installation from detected gaming tools
+        let wine_installed = self.env.hardware.gaming_tools.wine_installed;
+        if !wine_installed {
+            packages.push(RequiredPackage {
+                name: "wine".to_owned(),
+                reason: "Wine runtime for Windows binary execution.".to_owned(),
+                already_installed: false,
+            });
+        }
+
+        // Check gamemode
+        let gamemode_installed = self.env.hardware.gaming_tools.gamemode_installed;
+        if !gamemode_installed {
+            packages.push(RequiredPackage {
+                name: "gamemode".to_owned(),
+                reason: "GameMode for performance optimization in games.".to_owned(),
+                already_installed: false,
+            });
+        }
+
+        // Check vulkan tools
+        let vulkan_available = self.env.hardware.gaming_tools.vulkan_available;
+        if !vulkan_available {
+            packages.push(RequiredPackage {
+                name: "vulkan-tools".to_owned(),
+                reason: "Vulkan tools for GPU detection and debugging.".to_owned(),
+                already_installed: false,
+            });
+        }
+
         // DXVK and VKD3D-Proton are bundled in Proton-GE, no separate installation needed.
         let _ = layer;
-        vec![RequiredPackage {
-            name: "wine".to_owned(),
-            reason: "Wine runtime for Windows binary execution.".to_owned(),
-            already_installed: false, // ExecutionModule will verify
-        }]
+
+        packages
     }
 
     fn mangohud_hint(&self) -> String {

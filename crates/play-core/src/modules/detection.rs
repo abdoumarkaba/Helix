@@ -855,7 +855,7 @@ pub fn detect_display(
 /// Returns Some(MangoHudConfig) if mangohud --version succeeds.
 pub fn detect_mangohud(cmd_runner: &dyn CommandRunner) -> Option<crate::models::environment::MangoHudConfig> {
     info!("Checking for MangoHud...");
-    
+
     match cmd_runner.run_command("mangohud", &["--version"]) {
         Ok(_) => {
             info!("MangoHud detected and available");
@@ -868,6 +868,81 @@ pub fn detect_mangohud(cmd_runner: &dyn CommandRunner) -> Option<crate::models::
             info!("MangoHud not available: {e}");
             None
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gaming tools detection
+// ---------------------------------------------------------------------------
+
+/// Detect gaming-related tools (wine, winetricks, gamemode, dxvk, proton, vulkan).
+pub fn detect_gaming_tools(cmd_runner: &dyn CommandRunner) -> crate::models::environment::GamingToolsProfile {
+    info!("Detecting gaming tools...");
+
+    // Check wine
+    let (wine_installed, wine_version) = match cmd_runner.run_command("wine", &["--version"]) {
+        Ok(output) => {
+            let version = output.trim().to_string();
+            info!("Wine detected: {}", version);
+            (true, Some(version))
+        },
+        Err(e) => {
+            info!("Wine not available: {e}");
+            (false, None)
+        }
+    };
+
+    // Check winetricks
+    let winetricks_installed = cmd_runner.run_command("winetricks", &["--version"]).is_ok();
+    if winetricks_installed {
+        info!("Winetricks detected");
+    } else {
+        info!("Winetricks not available");
+    }
+
+    // Check gamemode (via gamemoderun binary)
+    let gamemode_installed = cmd_runner.run_command("gamemoderun", &["--version"]).is_ok()
+        || cmd_runner.run_command("gamemode", &["--version"]).is_ok();
+    if gamemode_installed {
+        info!("GameMode detected");
+    } else {
+        info!("GameMode not available");
+    }
+
+    // Check dxvk (via dxvk version or directory check)
+    let dxvk_installed = cmd_runner.run_command("dxvk", &["--version"]).is_ok()
+        || std::path::Path::new(&dirs::home_dir().unwrap_or_default().join(".local/share/dxvk")).exists();
+    if dxvk_installed {
+        info!("DXVK detected");
+    } else {
+        info!("DXVK not available");
+    }
+
+    // Check proton (Steam compatibility tools directory)
+    let proton_available = std::path::Path::new(&dirs::home_dir().unwrap_or_default().join(".steam/steam/compatibilitytools.d")).exists()
+        || std::path::Path::new(&dirs::home_dir().unwrap_or_default().join(".local/share/Steam/compatibilitytools.d")).exists();
+    if proton_available {
+        info!("Proton compatibility tools directory detected");
+    } else {
+        info!("Proton compatibility tools not found");
+    }
+
+    // Check vulkan (via vulkaninfo)
+    let vulkan_available = cmd_runner.run_command("vulkaninfo", &["--summary"]).is_ok();
+    if vulkan_available {
+        info!("Vulkan available");
+    } else {
+        info!("Vulkan not available");
+    }
+
+    crate::models::environment::GamingToolsProfile {
+        wine_installed,
+        wine_version,
+        winetricks_installed,
+        gamemode_installed,
+        dxvk_installed,
+        proton_available,
+        vulkan_available,
     }
 }
 
@@ -975,13 +1050,14 @@ pub fn detect_hardware(
     let display = detect_display(cmd_runner, wayland_display, x_display);
     let distro = detect_distro(etc_root)?;
     let mangohud = detect_mangohud(cmd_runner);
+    let gaming_tools = detect_gaming_tools(cmd_runner);
 
     info!(
         "hardware detection complete: {}/{}/{}",
         cpu.vendor as i32, gpu.vendor as i32, distro.distro as i32
     );
 
-    Ok(DetectionResult { hw: HardwareProfile { gpu, cpu, memory, kernel, display, distro }, audio, mangohud })
+    Ok(DetectionResult { hw: HardwareProfile { gpu, cpu, memory, kernel, display, distro, gaming_tools }, audio, mangohud })
 }
 
 #[cfg(test)]

@@ -1118,22 +1118,35 @@ impl Orchestrator {
 
         let pm = detect_package_manager(self.cmd_runner.as_ref())?;
 
+        // Display package status
+        self.report_progress("Package Status:");
+        for pkg in packages {
+            let is_installed = pm.is_installed(&pkg.name);
+            let status = if is_installed { "✓" } else { "•" };
+            let status_msg = if is_installed {
+                format!("{} {} (installed)", status, pkg.name)
+            } else {
+                format!("{} {} (to be installed)", status, pkg.name)
+            };
+            self.report_progress(&status_msg);
+        }
+
         // Check which packages are actually not installed
         let mut to_install: Vec<&str> = Vec::new();
         for pkg in packages {
-            if !pkg.already_installed {
-                // Double-check with package manager if not already marked as installed
-                if !pm.is_installed(&pkg.name) {
-                    to_install.push(&pkg.name);
-                }
+            if !pm.is_installed(&pkg.name) {
+                to_install.push(&pkg.name);
             }
         }
 
         if to_install.is_empty() {
+            self.report_progress("All required packages already installed. Proceeding...");
             info!("All required packages already installed");
             return Ok(());
         }
 
+        let install_msg = format!("Installing {} packages (sudo password may be required)...", to_install.len());
+        self.report_progress(&install_msg);
         info!(
             event = "packages_installing",
             packages = ?to_install,
@@ -1141,7 +1154,14 @@ impl Orchestrator {
             "Installing required packages"
         );
 
+        for pkg in &to_install {
+            let msg = format!("Installing {}...", pkg);
+            self.report_progress(&msg);
+        }
+
         pm.install(&to_install)?;
+
+        self.report_progress("Package installation complete.");
 
         // Verify Vulkan after installation (warning only, not blocking)
         self.verify_vulkan()?;
@@ -1334,6 +1354,15 @@ mod tests {
                         distro: crate::models::environment::Distro::Fedora,
                         version_id: "39".to_string(),
                         pretty_name: "Fedora 39".to_string(),
+                    },
+                    gaming_tools: crate::models::environment::GamingToolsProfile {
+                        wine_installed: false,
+                        wine_version: None,
+                        winetricks_installed: false,
+                        gamemode_installed: false,
+                        dxvk_installed: false,
+                        proton_available: false,
+                        vulkan_available: false,
                     },
                 },
                 graphics: crate::models::environment::GraphicsConfig {

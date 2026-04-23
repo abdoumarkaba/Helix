@@ -78,6 +78,15 @@ fn base_env(dx: DirectXVersion, pe_arch: PeArchitecture) -> GameEnvironment {
                 version_id: "43".to_owned(),
                 pretty_name: "Fedora Linux 43".to_owned(),
             },
+            gaming_tools: GamingToolsProfile {
+                wine_installed: false,
+                wine_version: None,
+                winetricks_installed: false,
+                gamemode_installed: false,
+                dxvk_installed: false,
+                proton_available: false,
+                vulkan_available: false,
+            },
         },
         graphics: GraphicsConfig {
             translation_layer: TranslationLayer::Dxvk,

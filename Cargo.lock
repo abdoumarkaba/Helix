@@ -892,6 +892,7 @@ dependencies = [
  "chrono",
  "console",
  "dialoguer",
+ "dirs",
  "glob",
  "goblin",
  "indexmap",
