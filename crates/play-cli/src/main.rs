@@ -139,7 +139,7 @@ fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
 fn display_error_with_context(
     error: &PlayError,
     exe_path: &Path,
-    _log_dir: &Path,
+    log_path: &Path,
     rollback_entries: &[play_core::orchestrator::RollbackEntry],
 ) {
     eprintln!("\n  {} {}", style("Error:").red().bold(), error);
@@ -184,11 +184,15 @@ fn display_error_with_context(
             eprintln!("    1. Check your internet connection");
             eprintln!("    2. Verify the runner URL is accessible");
             eprintln!(
-                "    3. Try again: {}",
+                "    3. Check the log file for details: {}",
+                style(log_path.display()).cyan()
+            );
+            eprintln!(
+                "    4. Try again: {}",
                 style(format!("play {}", exe_path.display())).cyan()
             );
             eprintln!(
-                "    4. Or rollback: {}",
+                "    5. Or rollback: {}",
                 style(format!("play --undo {}", exe_path.display())).cyan()
             );
         },
@@ -196,48 +200,71 @@ fn display_error_with_context(
             eprintln!("    1. Check if package manager is working");
             eprintln!("    2. Try installing manually with your package manager");
             eprintln!(
-                "    3. Try again: {}",
+                "    3. Check the log file for details: {}",
+                style(log_path.display()).cyan()
+            );
+            eprintln!(
+                "    4. Try again: {}",
                 style(format!("play {}", exe_path.display())).cyan()
             );
             eprintln!(
-                "    4. Or rollback: {}",
+                "    5. Or rollback: {}",
                 style(format!("play --undo {}", exe_path.display())).cyan()
             );
         },
         PlayError::GameCrash { .. } => {
             eprintln!(
-                "    1. Run {} to file a crash report",
+                "    1. Check the log file for details: {}",
+                style(log_path.display()).cyan()
+            );
+            eprintln!(
+                "    2. Run {} to file a crash report",
                 style(format!("play --report {}", exe_path.display())).cyan()
             );
-            eprintln!("    2. Check the game logs for crash details");
             eprintln!("    3. Try running with different compatibility settings");
         },
         PlayError::ValidationFailed { .. } => {
             eprintln!("    1. Check if game process is still running");
             eprintln!("    2. Verify GPU drivers are installed and working");
             eprintln!(
-                "    3. Run {} to file a report",
+                "    3. Check the log file for details: {}",
+                style(log_path.display()).cyan()
+            );
+            eprintln!(
+                "    4. Run {} to file a report",
                 style(format!("play --report {}", exe_path.display())).cyan()
             );
         },
         PlayError::NoRunnerAvailable { .. } => {
             eprintln!("    1. Check that ProtonGE runners are installed");
             eprintln!("    2. Install required tools (pciutils, vulkan-tools)");
-            eprintln!("    3. Try a different game or check runner compatibility");
+            eprintln!(
+                "    3. Check the log file for details: {}",
+                style(log_path.display()).cyan()
+            );
+            eprintln!("    4. Try a different game or check runner compatibility");
         },
         PlayError::UnsupportedDistro { .. } => {
             eprintln!("    1. Check if your distro is supported");
             eprintln!("    2. Try running on a supported distro (Ubuntu 22.04+, Fedora 38+, Arch, Debian 12+)");
+            eprintln!(
+                "    3. Check the log file for details: {}",
+                style(log_path.display()).cyan()
+            );
         },
         PlayError::InsufficientVram { .. } => {
             eprintln!("    1. Close other applications to free VRAM");
             eprintln!("    2. Lower game graphics settings");
             eprintln!("    3. Consider upgrading your GPU");
+            eprintln!(
+                "    4. Check the log file for details: {}",
+                style(log_path.display()).cyan()
+            );
         },
         _ => {
             eprintln!(
                 "    1. Check the log file for details: {}",
-                style("play --log-path").cyan()
+                style(log_path.display()).cyan()
             );
             eprintln!(
                 "    2. Try again: {}",
@@ -433,7 +460,7 @@ fn main() {
     };
 
     // Now setup tracing with exe_path for per-run log file naming
-    let log_dir = setup_tracing(args.verbose, Some(&exe_path));
+    let log_path = setup_tracing(args.verbose, Some(&exe_path));
 
     // Validate executable exists
     if !exe_path.exists() {
@@ -616,8 +643,7 @@ fn main() {
             );
 
             // Display error with full context including rollback info
-            display_error_with_context(&e, &exe_path, &log_dir, orchestrator.rollback_manifest());
-            let _ = log_dir; // Suppress unused warning, log path shown at startup
+            display_error_with_context(&e, &exe_path, &log_path, orchestrator.rollback_manifest());
 
             std::process::exit(1);
         },

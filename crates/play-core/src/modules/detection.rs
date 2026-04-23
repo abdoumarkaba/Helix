@@ -550,8 +550,14 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
             .map(|v| v / 1024) // Convert MiB to GiB roughly, or keep as MiB
             .unwrap_or(0);
 
-        // Parse driver version
-        let driver_version = Version::parse(driver_str).unwrap_or_else(|_| Version::new(0, 0, 0));
+        // Parse driver version (NVIDIA format like "580.142" doesn't match semver)
+        // Extract major version for comparison
+        let driver_version = driver_str
+            .split('.')
+            .next()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(|major| Version::new(major as u64, 0, 0))
+            .unwrap_or_else(|| Version::new(0, 0, 0));
 
         info!(vendor = "NVIDIA", model = %name, vram_mb, driver = %driver_str, method = "nvidia-smi", "gpu detection");
 

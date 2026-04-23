@@ -10,6 +10,7 @@ wire remote before first commit
 connect proper mcp servers 
 know what models to pick for which task for budget
 understand prompt caching
-
+autonomous work with clear post edit actions
+proper access control
 
 

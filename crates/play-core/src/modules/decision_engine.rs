@@ -317,26 +317,57 @@ impl DecisionEngine {
         manifest: &RunnersManifest,
         runners_install_root: &std::path::Path,
     ) -> Result<RunnerAction, PlayError> {
+        // Check play's install directory first
         let install_path =
             runners_install_root.join(format!("{runner_type:?}")).join(version.to_string());
         if install_path.exists() {
-            Ok(RunnerAction::AlreadyInstalled { path: install_path })
-        } else {
-            let release = manifest
-                .runners
-                .iter()
-                .find(|r| r.runner_type == runner_type && &r.version == version);
-            match release {
-                Some(r) => Ok(RunnerAction::Download {
-                    url: r.url.clone(),
-                    version: version.clone(),
-                    sha512: r.sha512.clone(),
-                }),
-                None => Err(PlayError::NoRunnerAvailable {
-                    runner_type: format!("{runner_type:?}"),
-                    version_min: version.to_string(),
-                }),
+            return Ok(RunnerAction::AlreadyInstalled { path: install_path });
+        }
+
+        // Check Steam compatibility tools directory
+        if let Some(home) = dirs::home_dir() {
+            let steam_compat_paths = vec![
+                home.join(".steam/steam/compatibilitytools.d"),
+                home.join(".local/share/Steam/compatibilitytools.d"),
+            ];
+
+            for compat_dir in steam_compat_paths {
+                if compat_dir.exists() {
+                    // Look for GE-Proton directory matching version
+                    // Version format: 10.34.0 -> directory name: GE-Proton10-34
+                    let version_str = version.to_string();
+                    let parts: Vec<&str> = version_str.split('.').collect();
+                    if parts.len() >= 2 {
+                        let proton_dir_name = format!("GE-Proton{}-{}", parts[0], parts[1]);
+                        let proton_path = compat_dir.join(&proton_dir_name);
+                        if proton_path.exists() {
+                            tracing::info!(
+                                event = "runner_found_in_steam",
+                                path = %proton_path.display(),
+                                "Found runner in Steam compatibility tools directory"
+                            );
+                            return Ok(RunnerAction::AlreadyInstalled { path: proton_path });
+                        }
+                    }
+                }
             }
+        }
+
+        // Not found anywhere, need to download
+        let release = manifest
+            .runners
+            .iter()
+            .find(|r| r.runner_type == runner_type && &r.version == version);
+        match release {
+            Some(r) => Ok(RunnerAction::Download {
+                url: r.url.clone(),
+                version: version.clone(),
+                sha512: r.sha512.clone(),
+            }),
+            None => Err(PlayError::NoRunnerAvailable {
+                runner_type: format!("{runner_type:?}"),
+                version_min: version.to_string(),
+            }),
         }
     }
 
