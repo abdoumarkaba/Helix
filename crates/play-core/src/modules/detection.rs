@@ -24,7 +24,7 @@ use std::process::Command;
 
 use semver::Version;
 use sysinfo::System;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::models::environment::{
     AudioBackend, AudioConfig, CpuArch, CpuProfile, CpuVendor, DisplayProfile, DisplayServer,
@@ -362,45 +362,76 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
         }
     };
 
-    let mut gpu_vendor = GpuVendor::Unknown;
-    let mut gpu_model = String::from("Unknown GPU");
-    let mut found = false;
+    debug!("lspci -mm output: {}", output);
 
-    // Find first VGA/3D controller line
+    let mut gpus: Vec<(GpuVendor, String)> = Vec::new();
+
+    // Find all VGA/3D controller lines (for multi-GPU systems)
     for line in output.lines() {
         if !line.contains("VGA compatible") && !line.contains("3D controller") {
             continue;
         }
 
-        // lspci -mm format: "slot Class Vendor Device SVendor SDevice"
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() > 2 {
-            let vendor_id = parts.get(2).unwrap_or(&"").trim_matches('"');
-            if vendor_id.starts_with("10de") {
-                gpu_vendor = GpuVendor::NVIDIA;
-            } else if vendor_id.starts_with("1002") || vendor_id.starts_with("1022") {
-                gpu_vendor = GpuVendor::AMD;
-            } else if vendor_id.starts_with("8086") {
-                gpu_vendor = GpuVendor::Intel;
-            }
+        debug!("Found GPU line: {}", line);
 
-            if let Some(desc) = parts.get(4) {
-                gpu_model = desc.trim_matches('"').to_string();
+        // lspci -mm format: slot Class Vendor Device SVendor SDevice
+        // The actual output uses space-separated quoted fields, not tab-separated
+        // Example: 01:00.0 "VGA compatible controller" "NVIDIA Corporation" "GA107BM / GN20-P0-R-K2 [GeForce RTX 3050 6GB Laptop GPU]" -ra1 -p00 "Dell" "Device 0bf8"
+        // Parse by extracting quoted strings
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        debug!("Line parts count: {}", parts.len());
+        
+        // Find the vendor name (position 2, quoted) and device name (position 3, quoted)
+        if parts.len() >= 4 {
+            let vendor_name = parts.get(2).unwrap_or(&"").trim_matches('"');
+            let device_name = parts.get(3).unwrap_or(&"").trim_matches('"');
+            
+            debug!("Vendor name: {}", vendor_name);
+            debug!("Device name: {}", device_name);
+            
+            // Detect vendor from vendor name string
+            let gpu_vendor = if vendor_name.contains("NVIDIA") {
+                GpuVendor::NVIDIA
+            } else if vendor_name.contains("AMD") || vendor_name.contains("ATI") {
+                GpuVendor::AMD
+            } else if vendor_name.contains("Intel") {
+                GpuVendor::Intel
+            } else {
+                // Fallback: try to detect from device name
+                if device_name.contains("NVIDIA") || device_name.contains("GeForce") || device_name.contains("RTX") {
+                    GpuVendor::NVIDIA
+                } else if device_name.contains("AMD") || device_name.contains("Radeon") {
+                    GpuVendor::AMD
+                } else if device_name.contains("Intel") {
+                    GpuVendor::Intel
+                } else {
+                    GpuVendor::Unknown
+                }
+            };
+            
+            if gpu_vendor != GpuVendor::Unknown {
+                gpus.push((gpu_vendor, device_name.to_string()));
             }
-            found = true;
         }
-        break;
     }
 
-    if !found {
+    if gpus.is_empty() {
+        debug!("No GPU found in lspci output");
         return None;
     }
+
+    // Prioritize discrete GPUs (NVIDIA/AMD) over integrated (Intel)
+    // On laptops with hybrid graphics, we want the discrete GPU
+    let (gpu_vendor, gpu_model) = gpus.iter()
+        .find(|(vendor, _)| *vendor == GpuVendor::NVIDIA || *vendor == GpuVendor::AMD)
+        .or_else(|| gpus.first())
+        .unwrap();
 
     info!(vendor = ?gpu_vendor, model = %gpu_model, method = "lspci", "gpu detection");
 
     Some(GpuProfile {
-        vendor: gpu_vendor,
-        model: gpu_model,
+        vendor: *gpu_vendor,
+        model: gpu_model.clone(),
         vram_mb: 0,
         driver_version: Version::new(0, 0, 0),
         vulkan_version: None,
@@ -431,19 +462,27 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
         }
     };
 
+    debug!("vulkaninfo --summary output: {}", output);
+
     let mut gpu_vendor = GpuVendor::Unknown;
     let mut gpu_model = String::from("Unknown GPU");
 
     // Parse vulkaninfo output for device name and vendor
+    // Format: deviceName         = Intel(R) Graphics (RPL-S)
+    //         vendorID           = 0x8086
     for line in output.lines() {
         if line.contains("deviceName") {
-            if let Some(name) = line.split(':').nth(1) {
+            // Split by '=' and take the second part
+            if let Some(name) = line.split('=').nth(1) {
                 gpu_model = name.trim().to_string();
+                debug!("Found deviceName: {}", gpu_model);
             }
         }
         if line.contains("vendorID") {
-            if let Some(vendor) = line.split(':').nth(1) {
+            // Split by '=' and take the second part
+            if let Some(vendor) = line.split('=').nth(1) {
                 let vendor_str = vendor.trim();
+                debug!("Found vendorID: {}", vendor_str);
                 if vendor_str.contains("0x10de") || vendor_str.contains("NVIDIA") {
                     gpu_vendor = GpuVendor::NVIDIA;
                 } else if vendor_str.contains("0x1002") || vendor_str.contains("0x1022") || vendor_str.contains("AMD") {
@@ -456,6 +495,7 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
     }
 
     if gpu_model == "Unknown GPU" && gpu_vendor == GpuVendor::Unknown {
+        debug!("No GPU found in vulkaninfo output");
         return None;
     }
 
@@ -808,6 +848,30 @@ pub fn detect_display(
 }
 
 // ---------------------------------------------------------------------------
+// MangoHud detection
+// ---------------------------------------------------------------------------
+
+/// Detect if MangoHud is installed and available.
+/// Returns Some(MangoHudConfig) if mangohud --version succeeds.
+pub fn detect_mangohud(cmd_runner: &dyn CommandRunner) -> Option<crate::models::environment::MangoHudConfig> {
+    info!("Checking for MangoHud...");
+    
+    match cmd_runner.run_command("mangohud", &["--version"]) {
+        Ok(_) => {
+            info!("MangoHud detected and available");
+            Some(crate::models::environment::MangoHudConfig {
+                enabled: true,
+                config_path: None,
+            })
+        },
+        Err(e) => {
+            info!("MangoHud not available: {e}");
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Distro detection
 // ---------------------------------------------------------------------------
 
@@ -863,9 +927,11 @@ pub fn detect_distro(etc_root: &Path) -> Result<DistroInfo, PlayError> {
 
 /// Result of full hardware + audio detection.
 /// Audio is returned separately because it feeds `AudioConfig`, not `HardwareProfile`.
+/// MangoHud is returned separately because it feeds `GraphicsConfig`, not `HardwareProfile`.
 pub struct DetectionResult {
     pub hw: HardwareProfile,
     pub audio: AudioConfig,
+    pub mangohud: Option<crate::models::environment::MangoHudConfig>,
 }
 
 /// Detect all hardware components and return a complete [`DetectionResult`].
@@ -908,13 +974,14 @@ pub fn detect_hardware(
     let audio = detect_audio(cmd_runner);
     let display = detect_display(cmd_runner, wayland_display, x_display);
     let distro = detect_distro(etc_root)?;
+    let mangohud = detect_mangohud(cmd_runner);
 
     info!(
         "hardware detection complete: {}/{}/{}",
         cpu.vendor as i32, gpu.vendor as i32, distro.distro as i32
     );
 
-    Ok(DetectionResult { hw: HardwareProfile { gpu, cpu, memory, kernel, display, distro }, audio })
+    Ok(DetectionResult { hw: HardwareProfile { gpu, cpu, memory, kernel, display, distro }, audio, mangohud })
 }
 
 #[cfg(test)]

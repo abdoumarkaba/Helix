@@ -173,6 +173,12 @@ impl<'a> PlanBuilder<'a> {
             }
         }
 
+        // Auto-enable MangoHud if installed
+        if self.env.graphics.mangohud.as_ref().is_some_and(|m| m.enabled) {
+            env.launch.env.insert("MANGOHUD".to_owned(), "1".to_owned());
+            info!("MangoHud auto-enabled (installed and detected)");
+        }
+
         // Log completion stats before moving decisions
         info!("Plan complete: {} decisions, {} tweaks, {} warnings", decisions.len(), tweaks.len(), warnings.len());
 
@@ -268,10 +274,10 @@ impl<'a> PlanBuilder<'a> {
         // Check for optional tools — emit warnings if absent.
         // (In a real implementation we'd check if gamemoded binary exists.)
         // For now, absence is detected via `gamemode` flag in env.
-        // MangoHud: not currently in HardwareProfile — warn unconditionally if not in env.
-        if !self.env.graphics.mangohud.as_ref().is_some_and(|m| m.enabled) {
+        // MangoHud: warn only if not installed (None in env), not if just not configured
+        if self.env.graphics.mangohud.is_none() {
             warnings.push(PlanWarning {
-                message: "MangoHud not configured — performance overlay unavailable.".to_owned(),
+                message: "MangoHud not installed — performance overlay unavailable.".to_owned(),
                 install_hint: Some(self.mangohud_hint()),
             });
         }

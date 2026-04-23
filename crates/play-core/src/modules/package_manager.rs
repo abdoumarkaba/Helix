@@ -58,14 +58,16 @@ impl PackageManager for AptPm {
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
-        let output =
-            Command::new("apt-get").args(["install", "-y"]).args(packages).output().map_err(
-                |e| PlayError::PackageInstall {
-                    pm: "apt".into(),
-                    package: packages.join(", "),
-                    stderr: e.to_string(),
-                },
-            )?;
+        // Try with sudo first (for interactive terminals)
+        let output = Command::new("sudo")
+            .args(["apt-get", "install", "-y"])
+            .args(packages)
+            .output()
+            .map_err(|e| PlayError::PackageInstall {
+                pm: "apt".into(),
+                package: packages.join(", "),
+                stderr: e.to_string(),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -106,13 +108,15 @@ impl PackageManager for DnfPm {
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
-        let output =
-            Command::new("dnf").args(["install", "-y"]).args(packages).output().map_err(|e| {
-                PlayError::PackageInstall {
-                    pm: "dnf".into(),
-                    package: packages.join(", "),
-                    stderr: e.to_string(),
-                }
+        // Try with sudo first (for interactive terminals)
+        let output = Command::new("sudo")
+            .args(["dnf", "install", "-y"])
+            .args(packages)
+            .output()
+            .map_err(|e| PlayError::PackageInstall {
+                pm: "dnf".into(),
+                package: packages.join(", "),
+                stderr: e.to_string(),
             })?;
 
         if !output.status.success() {
@@ -154,14 +158,16 @@ impl PackageManager for PacmanPm {
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
-        let output =
-            Command::new("pacman").args(["-S", "--noconfirm"]).args(packages).output().map_err(
-                |e| PlayError::PackageInstall {
-                    pm: "pacman".into(),
-                    package: packages.join(", "),
-                    stderr: e.to_string(),
-                },
-            )?;
+        // Try with sudo first (for interactive terminals)
+        let output = Command::new("sudo")
+            .args(["pacman", "-S", "--noconfirm"])
+            .args(packages)
+            .output()
+            .map_err(|e| PlayError::PackageInstall {
+                pm: "pacman".into(),
+                package: packages.join(", "),
+                stderr: e.to_string(),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -202,14 +208,16 @@ impl PackageManager for ZypperPm {
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
-        let output =
-            Command::new("zypper").args(["install", "-y"]).args(packages).output().map_err(
-                |e| PlayError::PackageInstall {
-                    pm: "zypper".into(),
-                    package: packages.join(", "),
-                    stderr: e.to_string(),
-                },
-            )?;
+        // Try with sudo first (for interactive terminals)
+        let output = Command::new("sudo")
+            .args(["zypper", "install", "-y"])
+            .args(packages)
+            .output()
+            .map_err(|e| PlayError::PackageInstall {
+                pm: "zypper".into(),
+                package: packages.join(", "),
+                stderr: e.to_string(),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

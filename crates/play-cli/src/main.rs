@@ -542,6 +542,17 @@ fn main() {
         progress_bar.set_message(msg);
     });
 
+    // Set pre/post confirmation callbacks to pause/resume progress bar
+    let progress_bar_pause = pb.clone();
+    orchestrator.set_pre_confirm_callback(Box::new(move || {
+        progress_bar_pause.disable_steady_tick();
+    }));
+
+    let progress_bar_resume = pb.clone();
+    orchestrator.set_post_confirm_callback(Box::new(move || {
+        progress_bar_resume.enable_steady_tick(std::time::Duration::from_millis(100));
+    }));
+
     let result = orchestrator.run(&exe_path);
 
     pb.finish_with_message("Session complete");

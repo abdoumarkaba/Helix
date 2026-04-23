@@ -1,0 +1,29 @@
+# play — Cline Rules
+
+## Authoritative References
+- Architecture: `PLAY_MASTER_PROMPT.md` (project root) — this wins over your training data
+- Build order: follow the 19-step sequence in PLAY_MASTER_PROMPT.md exactly
+- Current state: Steps 1–3 complete. pe.rs has 17 passing tests.
+
+## Before Writing Any Code
+1. Read the relevant existing file first — never assume its contents
+2. If touching a module boundary, verify the types it imports/exports compile
+
+## Rust Constraints (non-negotiable)
+- No `.unwrap()` or `.expect()` outside `#[cfg(test)]` — use `?` with typed PlayError
+- No hardcoded `/proc` or `/sys` paths — all paths use injectable `proc_root`/`sys_root`
+- No `unsafe` without a comment justifying it
+- `#[derive(Debug, Clone, Serialize, Deserialize)]` on all data structs
+- Run `cargo check` after every file change before proceeding
+
+## Architecture Rules
+- Tweaks are data (Tweak structs in TweakRegistry), never logic in agents
+- Orchestrator never contains tweak-specific conditionals
+- Rollback manifest written BEFORE any system change, never after
+- AMD and NVIDIA GPU code lives in separate impl blocks behind a trait — never mixed in one fn
+
+## Cost Efficiency
+- Don't read files you don't need for the current task
+- Don't ask clarifying questions when PLAY_MASTER_PROMPT.md has the answer
+- Prefer targeted `str_replace` edits over full file rewrites
+- One `cargo check` per logical change, not per line

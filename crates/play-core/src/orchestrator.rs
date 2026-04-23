@@ -148,6 +148,12 @@ pub enum RestoreMethod {
 /// Type alias for user confirmation callback.
 type ConfirmCallback = Box<dyn Fn(&GamePlan) -> bool>;
 
+/// Type alias for pre-confirmation callback (e.g., to pause progress bar).
+type PreConfirmCallback = Box<dyn Fn()>;
+
+/// Type alias for post-confirmation callback (e.g., to resume progress bar).
+type PostConfirmCallback = Box<dyn Fn()>;
+
 /// The central coordinator for the play lifecycle.
 ///
 /// Holds all state for a single game session. Created fresh for each
@@ -179,6 +185,10 @@ pub struct Orchestrator {
     cmd_runner: Box<dyn CommandRunner>,
     /// User confirmation callback (returns true to proceed).
     confirm_callback: Option<ConfirmCallback>,
+    /// Pre-confirmation callback (e.g., to pause progress bar).
+    pre_confirm_callback: Option<PreConfirmCallback>,
+    /// Post-confirmation callback (e.g., to resume progress bar).
+    post_confirm_callback: Option<PostConfirmCallback>,
     /// Handle to the spawned game process (set during execution phase).
     running_game: Option<std::process::Child>,
     /// Progress callback for phase updates.
@@ -194,6 +204,11 @@ impl Orchestrator {
     /// Get the PID of the running game process (if any).
     pub fn running_game_pid(&self) -> Option<u32> {
         self.running_game.as_ref().map(|c| c.id())
+    }
+
+    /// Get the current phase.
+    pub fn phase(&self) -> OrchestratorPhase {
+        self.phase
     }
 
     /// Set progress callback for phase updates.
@@ -243,6 +258,8 @@ impl Orchestrator {
             rollback_manifest: Vec::new(),
             cmd_runner,
             confirm_callback: None,
+            pre_confirm_callback: None,
+            post_confirm_callback: None,
             running_game: None,
             progress_callback: None,
         }
@@ -274,19 +291,26 @@ impl Orchestrator {
             rollback_manifest: Vec::new(),
             cmd_runner,
             confirm_callback: None,
+            pre_confirm_callback: None,
+            post_confirm_callback: None,
             running_game: None,
             progress_callback: None,
         }
     }
 
     /// Set a custom confirmation callback (for testing or non-interactive mode).
-    pub fn set_confirm_callback(&mut self, callback: Box<dyn Fn(&GamePlan) -> bool>) {
+    pub fn set_confirm_callback(&mut self, callback: ConfirmCallback) {
         self.confirm_callback = Some(callback);
     }
 
-    /// Get the current phase.
-    pub fn phase(&self) -> OrchestratorPhase {
-        self.phase
+    /// Set pre-confirmation callback (e.g., to pause progress bar).
+    pub fn set_pre_confirm_callback(&mut self, callback: PreConfirmCallback) {
+        self.pre_confirm_callback = Some(callback);
+    }
+
+    /// Set post-confirmation callback (e.g., to resume progress bar).
+    pub fn set_post_confirm_callback(&mut self, callback: PostConfirmCallback) {
+        self.post_confirm_callback = Some(callback);
     }
 
     /// Get the current plan (if planning has completed).
@@ -433,6 +457,7 @@ impl Orchestrator {
 
         let hw = result.hw;
         let audio = result.audio;
+        let mangohud = result.mangohud;
 
         // Binary analysis
         let binary = analyze_binary(exe_path)?;
@@ -455,7 +480,7 @@ impl Orchestrator {
         };
 
         // Build partial GameEnvironment (detection fields only)
-        let env = self.build_partial_env(identity, hw, audio)?;
+        let env = self.build_partial_env(identity, hw, audio, mangohud)?;
 
         self.env = Some(env);
         self.phase = OrchestratorPhase::Detected;
@@ -508,12 +533,22 @@ impl Orchestrator {
             reason: "no plan in confirmation phase".to_string(),
         })?;
 
+        // Call pre-confirmation callback (e.g., to pause progress bar)
+        if let Some(ref cb) = self.pre_confirm_callback {
+            cb();
+        }
+
         let confirmed = if let Some(ref callback) = self.confirm_callback {
             callback(plan)
         } else {
             // Default: use dialoguer for interactive confirmation
             self.interactive_confirm(plan)?
         };
+
+        // Call post-confirmation callback (e.g., to resume progress bar)
+        if let Some(ref cb) = self.post_confirm_callback {
+            cb();
+        }
 
         if confirmed {
             self.phase = OrchestratorPhase::Confirmed;
@@ -938,6 +973,7 @@ impl Orchestrator {
         identity: GameIdentity,
         hw: HardwareProfile,
         audio: AudioConfig,
+        mangohud: Option<crate::models::environment::MangoHudConfig>,
     ) -> Result<GameEnvironment, PlayError> {
         use crate::models::environment::{
             DxvkConfig, DxvkHud, EnvironmentMetadata, GraphicsConfig, LaunchConfig, PrefixConfig,
@@ -957,7 +993,7 @@ impl Orchestrator {
                 state_cache: true,
                 config_path: PathBuf::new(),
             },
-            mangohud: None,
+            mangohud,
             gamemode: false,
         };
 
@@ -1082,10 +1118,19 @@ impl Orchestrator {
 
         let pm = detect_package_manager(self.cmd_runner.as_ref())?;
 
-        let to_install: Vec<&str> =
-            packages.iter().filter(|p| !p.already_installed).map(|p| p.name.as_str()).collect();
+        // Check which packages are actually not installed
+        let mut to_install: Vec<&str> = Vec::new();
+        for pkg in packages {
+            if !pkg.already_installed {
+                // Double-check with package manager if not already marked as installed
+                if !pm.is_installed(&pkg.name) {
+                    to_install.push(&pkg.name);
+                }
+            }
+        }
 
         if to_install.is_empty() {
+            info!("All required packages already installed");
             return Ok(());
         }
 
