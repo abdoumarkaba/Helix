@@ -51,7 +51,7 @@ use crate::modules::validation::ValidationModule;
 ///
 /// State transitions are strictly sequential. Attempting to skip phases
 /// is a programming error (debug builds will panic).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum OrchestratorPhase {
     /// Initial state, nothing detected yet.
     Initialized,
@@ -334,33 +334,40 @@ impl Orchestrator {
             reason: format!("failed to create state directory: {e}"),
         })?;
 
-        // Phase 1: Detection
-        self.detect(exe_path)?;
-        if self.phase == OrchestratorPhase::Failed {
-            return self.final_error();
-        }
-
-        // After detection, rename state directory to use real SHA256
-        self.rename_state_to_hash()?;
-
-        // Phase 2: Planning
-        self.plan_phase()?;
-        if self.phase == OrchestratorPhase::Failed {
-            return self.final_error();
-        }
-
-        // Check for hard blocks
-        if let Some(ref plan) = self.plan {
-            if !plan.hard_blocks.is_empty() {
-                error!(
-                    event = "planning_blocked",
-                    blocks = ?plan.hard_blocks,
-                    "Planning found hard blocks, cannot proceed"
-                );
-                self.phase = OrchestratorPhase::Failed;
-                self.write_checkpoint()?;
+        // Phase 1: Detection (skip if already detected from checkpoint)
+        if self.phase < OrchestratorPhase::Detected {
+            self.detect(exe_path)?;
+            if self.phase == OrchestratorPhase::Failed {
                 return self.final_error();
             }
+            // After detection, rename state directory to use real SHA256
+            self.rename_state_to_hash()?;
+        } else {
+            info!(event = "phase_skip", phase = "detection", "Skipping detection: already complete from checkpoint");
+        }
+
+        // Phase 2: Planning (skip if already planned from checkpoint)
+        if self.phase < OrchestratorPhase::Planned {
+            self.plan_phase()?;
+            if self.phase == OrchestratorPhase::Failed {
+                return self.final_error();
+            }
+
+            // Check for hard blocks
+            if let Some(ref plan) = self.plan {
+                if !plan.hard_blocks.is_empty() {
+                    error!(
+                        event = "planning_blocked",
+                        blocks = ?plan.hard_blocks,
+                        "Planning found hard blocks, cannot proceed"
+                    );
+                    self.phase = OrchestratorPhase::Failed;
+                    self.write_checkpoint()?;
+                    return self.final_error();
+                }
+            }
+        } else {
+            info!(event = "phase_skip", phase = "planning", "Skipping planning: already complete from checkpoint");
         }
 
         // Phase 3: Confirmation
