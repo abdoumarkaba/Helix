@@ -14,4 +14,8 @@ autonomous work with clear post edit actions
 proper access control
 always format test cmds for easiest testing, ideally just add a proper path in rc
 
+BURNING QUESTIONS: 
+should play be a one off optimize system once & then fuck off?
+
+
 
