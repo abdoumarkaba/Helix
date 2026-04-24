@@ -19,7 +19,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use semver::Version;
@@ -29,7 +29,7 @@ use tracing::{debug, info, warn};
 use crate::models::environment::{
     AudioBackend, AudioConfig, CpuArch, CpuProfile, CpuVendor, DisplayProfile, DisplayServer,
     Distro, DistroInfo, DriverType, GpuFeatureSet, GpuProfile, GpuVendor, HardwareProfile,
-    KernelProfile, KernelVersion, MemoryProfile, ThpMode, WineAudioDriver,
+    KernelProfile, KernelVersion, MemoryProfile, SteamInstallation, ThpMode, WineAudioDriver,
 };
 use crate::models::errors::PlayError;
 
@@ -106,7 +106,7 @@ pub fn read_kernel_version(proc_root: &Path) -> Result<KernelVersion, PlayError>
             return Ok(version);
         }
     }
-
+    
     Err(PlayError::HardwareDetection { component: "kernel.version".into() })
 }
 
@@ -1287,4 +1287,35 @@ mod tests {
         let result = detect_distro(tempdir.path());
         assert!(result.is_err());
     }
+}
+
+// ---------------------------------------------------------------------------
+// Steam Detection
+// ---------------------------------------------------------------------------
+
+/// Detect Steam installation directory.
+///
+/// Checks common Steam installation paths in order:
+/// 1. `~/.steam/steam`
+/// 2. `~/.local/share/Steam`
+/// 3. `/usr/lib/steam`
+///
+/// Returns `None` if Steam is not found. Caller should fall back to stub directory.
+pub fn detect_steam_installation() -> Option<SteamInstallation> {
+    let home_dir = dirs::home_dir()?;
+    let steam_paths = vec![
+        home_dir.join(".steam/steam"),
+        home_dir.join(".local/share/Steam"),
+        PathBuf::from("/usr/lib/steam"),
+    ];
+
+    for path in steam_paths {
+        if path.exists() {
+            info!("Steam installation detected at: {}", path.display());
+            return Some(SteamInstallation { path });
+        }
+    }
+
+    info!("Steam installation not found; will use stub directory");
+    None
 }

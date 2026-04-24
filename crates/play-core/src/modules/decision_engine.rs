@@ -98,25 +98,51 @@ impl DecisionEngine {
     // -----------------------------------------------------------------------
 
     /// Async compilation must be disabled for VAC/EAC/BattlEye-protected games.
-    pub fn configure_dxvk_async(anti_cheat: &[AntiCheat]) -> (bool, ResolutionDecision) {
+    /// Also disabled on first run when DXVK cache doesn't exist to avoid compounding overhead.
+    pub fn configure_dxvk_async(anti_cheat: &[AntiCheat], cache_path: Option<&std::path::Path>) -> (bool, ResolutionDecision) {
 
-        let (enabled, reason) = if anti_cheat.iter().any(|ac| {
+        // Check anti-cheat first (always disable if present)
+        if anti_cheat.iter().any(|ac| {
             matches!(
                 ac,
                 AntiCheat::EasyAntiCheat { .. } | AntiCheat::BattlEye { .. } | AntiCheat::Denuvo
             )
         }) {
-            (false, "Anti-cheat present; async shader compilation disabled to avoid triggering detections.")
-        } else {
-            (true, "No blocking anti-cheat; async shader compilation enabled to eliminate first-run hitches.")
-        };
+            return (
+                false,
+                ResolutionDecision {
+                    field: "graphics.dxvk_config.async_compile".to_owned(),
+                    chosen: "false".to_owned(),
+                    reason: "Anti-cheat present; async shader compilation disabled to avoid triggering detections.".to_owned(),
+                    confidence: Confidence::High,
+                    source: DecisionSource::Heuristic,
+                },
+            );
+        }
 
+        // Check if cache file exists (disable async on cold start)
+        let cache_exists = cache_path.and_then(|p| p.exists().then_some(true)).unwrap_or(false);
+
+        if !cache_exists {
+            return (
+                false,
+                ResolutionDecision {
+                    field: "graphics.dxvk_config.async_compile".to_owned(),
+                    chosen: "false".to_owned(),
+                    reason: "DXVK state cache not found; async compilation disabled on first run to avoid compounding overhead.".to_owned(),
+                    confidence: Confidence::High,
+                    source: DecisionSource::Heuristic,
+                },
+            );
+        }
+
+        // Cache exists and no anti-cheat: enable async
         (
-            enabled,
+            true,
             ResolutionDecision {
                 field: "graphics.dxvk_config.async_compile".to_owned(),
-                chosen: enabled.to_string(),
-                reason: reason.to_owned(),
+                chosen: "true".to_owned(),
+                reason: "DXVK state cache exists; async shader compilation enabled to eliminate hitches.".to_owned(),
                 confidence: Confidence::High,
                 source: DecisionSource::Heuristic,
             },
@@ -705,20 +731,29 @@ mod tests {
     #[test]
     fn denuvo_disables_async() {
         let ac = vec![AntiCheat::Denuvo];
-        let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac);
+        let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac, None);
         assert!(!enabled);
     }
 
     #[test]
     fn eac_disables_async() {
         let ac = vec![AntiCheat::EasyAntiCheat { linux_supported: true }];
-        let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac);
+        let (enabled, _) = DecisionEngine::configure_dxvk_async(&ac, None);
         assert!(!enabled);
     }
 
     #[test]
-    fn no_anticheat_enables_async() {
-        let (enabled, _) = DecisionEngine::configure_dxvk_async(&[]);
+    fn no_anticheat_no_cache_disables_async() {
+        let (enabled, _) = DecisionEngine::configure_dxvk_async(&[], None);
+        assert!(!enabled);
+    }
+
+    #[test]
+    fn cache_exists_enables_async() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_path = temp_dir.path().join("dxvk-cache");
+        std::fs::write(&cache_path, "dummy").unwrap();
+        let (enabled, _) = DecisionEngine::configure_dxvk_async(&[], Some(&cache_path));
         assert!(enabled);
     }
 

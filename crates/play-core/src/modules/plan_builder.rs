@@ -5,7 +5,10 @@
 /// Nothing is written to the filesystem here.
 use std::path::PathBuf;
 
+use dirs;
 use tracing::{info, warn};
+
+use crate::modules::detection::detect_steam_installation;
 
 use crate::models::environment::{
     GameEnvironment, ResolutionDecision, SystemTuning, TranslationLayer,
@@ -61,8 +64,14 @@ impl<'a> PlanBuilder<'a> {
 
         // --- 5. DXVK async ---
         info!("Configuring DXVK async...");
-        let (async_compile, dec) = DecisionEngine::configure_dxvk_async(&self.env.identity.anti_cheat);
-        info!("DXVK async: {}", async_compile);
+        // Construct DXVK cache path for first-run detection
+        let cache_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("play/cache")
+            .join(&self.env.identity.exe_hash);
+        let cache_path = cache_dir.join("dxvk-cache");
+        let (async_compile, dec) = DecisionEngine::configure_dxvk_async(&self.env.identity.anti_cheat, Some(&cache_path));
+        info!("DXVK async: {} (cache path: {})", async_compile, cache_path.display());
         decisions.push(dec);
 
         // --- 6. Runner ---
@@ -240,13 +249,41 @@ impl<'a> PlanBuilder<'a> {
             | crate::models::environment::RunnerType::ProtonOfficial => {
                 // Proton uses STEAM_COMPAT_DATA_PATH for the prefix
                 env.launch.env.insert("STEAM_COMPAT_DATA_PATH".to_owned(), prefix_path.to_string_lossy().to_string());
-                // STEAM_COMPAT_CLIENT_INSTALL_PATH is required but can be empty for non-Steam games
-                env.launch.env.insert("STEAM_COMPAT_CLIENT_INSTALL_PATH".to_owned(), "/dev/null".to_owned());
+                // WINEPREFIX should be STEAM_COMPAT_DATA_PATH/pfx for GE-Proton compatibility
+                let pfx_path = prefix_path.join("pfx");
+                env.launch.env.insert("WINEPREFIX".to_owned(), pfx_path.to_string_lossy().to_string());
+
+                // STEAM_COMPAT_CLIENT_INSTALL_PATH: detect Steam or use stub
+                let steam_install = detect_steam_installation();
+                let client_path = if let Some(steam) = steam_install {
+                    steam.path.to_string_lossy().to_string()
+                } else {
+                    // Create stub directory
+                    let stub_path = dirs::data_local_dir()
+                        .unwrap_or_else(|| PathBuf::from("/tmp"))
+                        .join("play/steam-stub");
+                    if let Err(e) = std::fs::create_dir_all(&stub_path) {
+                        warn!("Failed to create Steam stub directory {}: {}", stub_path.display(), e);
+                    }
+                    stub_path.to_string_lossy().to_string()
+                };
+                env.launch.env.insert("STEAM_COMPAT_CLIENT_INSTALL_PATH".to_owned(), client_path);
+
+                // DXVK state cache path for persistence
+                let cache_dir = dirs::data_local_dir()
+                    .unwrap_or_else(|| PathBuf::from("/tmp"))
+                    .join("play/cache")
+                    .join(&env.identity.exe_hash);
+                if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+                    warn!("Failed to create DXVK cache directory {}: {}", cache_dir.display(), e);
+                }
+                env.launch.env.insert("DXVK_STATE_CACHE_PATH".to_owned(), cache_dir.to_string_lossy().to_string());
+
                 // Enable Proton logging for debugging (BUG-6)
                 env.launch.env.insert("PROTON_LOG".to_owned(), "1".to_owned());
                 // Reduce Wine debug output noise (BUG-6)
                 env.launch.env.insert("WINEDEBUG".to_owned(), "-all".to_owned());
-                info!("Proton environment configured: STEAM_COMPAT_DATA_PATH={}", prefix_path.display());
+                info!("Proton environment configured: STEAM_COMPAT_DATA_PATH={}, WINEPREFIX={}", prefix_path.display(), pfx_path.display());
             },
             crate::models::environment::RunnerType::WineGE
             | crate::models::environment::RunnerType::WineStaging

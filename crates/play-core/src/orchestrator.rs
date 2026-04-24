@@ -600,7 +600,7 @@ impl Orchestrator {
             reason: "no environment in execution phase".to_string(),
         })?;
 
-        let guards = system_module.apply(&plan.tweaks, &env.hardware)?;
+        let guards = system_module.apply_tweaks(&plan.tweaks, &env.hardware)?;
 
         // Clone plan data before mutable borrows
         let tweaks_clone = plan.tweaks.clone();

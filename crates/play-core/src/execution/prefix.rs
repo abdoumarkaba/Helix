@@ -263,15 +263,31 @@ impl PrefixModule {
     /// Create a new Wine prefix via wineboot.
     ///
     /// Sets WINEPREFIX and WINEARCH environment variables.
+    /// For GE-Proton compatibility, ensures pfx/ subdirectory exists.
     fn create_prefix(&self, path: &Path, arch: WineArch) -> Result<(), PlayError> {
         let arch_str = match arch {
             WineArch::Win32 => "win32",
             WineArch::Win64 => "win64",
         };
 
-        // Run wineboot to initialize the prefix
+        // For GE-Proton compatibility: ensure pfx/ subdirectory exists
+        // GE-Proton expects STEAM_COMPAT_DATA_PATH/pfx as the actual WINEPREFIX
+        let pfx_path = path.join("pfx");
+        if !pfx_path.exists() {
+            fs::create_dir_all(&pfx_path).map_err(|e| PlayError::PrefixCreation {
+                prefix_path: path.to_owned(),
+                reason: format!("failed to create pfx/ subdirectory: {e}"),
+            })?;
+            tracing::info!(
+                event = "pfx_subdirectory_created",
+                path = %pfx_path.display(),
+                "Created pfx/ subdirectory for GE-Proton compatibility"
+            );
+        }
+
+        // Run wineboot to initialize the prefix (using pfx/ as WINEPREFIX)
         let output =
-            self.run_wine_with_env(path, &["wineboot", "--init"], &[("WINEARCH", arch_str)])?;
+            self.run_wine_with_env(&pfx_path, &["wineboot", "--init"], &[("WINEARCH", arch_str)])?;
 
         tracing::debug!(
             event = "wineboot_completed",
@@ -548,6 +564,22 @@ mod tests {
 
         let result = PrefixModule::verify_prefix(&prefix_path);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn create_prefix_creates_pfx_subdirectory() {
+        let root = temp_prefix_root();
+        let prefix_path = root.path().join("test_prefix");
+        let mock = MockCommandRunner::new();
+        let module = PrefixModule::with_runner(Box::new(mock));
+
+        let result = module.create_prefix(&prefix_path, WineArch::Win64);
+        assert!(result.is_ok());
+
+        // Verify pfx/ subdirectory was created
+        let pfx_path = prefix_path.join("pfx");
+        assert!(pfx_path.exists());
+        assert!(pfx_path.is_dir());
     }
 
     #[test]

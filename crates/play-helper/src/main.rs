@@ -1,6 +1,16 @@
 use std::env;
 use std::fs;
 use std::process::ExitCode;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+enum BatchedTweakCommand {
+    #[serde(rename = "sysctl_write")]
+    SysctlWrite(String, String),
+    #[serde(rename = "sysfs_write")]
+    SysfsWrite(String, String),
+}
 
 /// Whitelist of allowed sysfs paths for security.
 /// Only these paths can be written to via play-helper.
@@ -41,6 +51,7 @@ fn main() -> ExitCode {
         eprintln!("  sysctl-write <key> <value>   - Write to /proc/sys/<key>");
         eprintln!("  sysfs-write <path> <value>   - Write to /sys/<path>");
         eprintln!("  write-file <path> <content>  - Write content to file");
+        eprintln!("  batch <json>                 - Execute batched commands from JSON");
         return ExitCode::FAILURE;
     }
 
@@ -71,6 +82,14 @@ fn main() -> ExitCode {
             let path = &args[2];
             let content = &args[3];
             write_file(path, content)
+        },
+        "batch" => {
+            if args.len() != 3 {
+                eprintln!("Usage: play-helper batch <json>");
+                return ExitCode::FAILURE;
+            }
+            let json = &args[2];
+            batch_execute(json)
         },
         _ => {
             eprintln!("Unknown subcommand: {}", args[1]);
@@ -137,4 +156,49 @@ fn write_to_file(path: &str, content: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+fn batch_execute(json: &str) -> ExitCode {
+    let commands: Vec<BatchedTweakCommand> = match serde_json::from_str(json) {
+        Ok(cmds) => cmds,
+        Err(e) => {
+            eprintln!("Failed to parse batch JSON: {}", e);
+            return ExitCode::FAILURE;
+        },
+    };
+
+    let mut failed = false;
+    for cmd in commands {
+        let result = match cmd {
+            BatchedTweakCommand::SysctlWrite(key, value) => sysctl_write(&key, &value),
+            BatchedTweakCommand::SysfsWrite(path, value) => sysfs_write(&path, &value),
+        };
+        if result != ExitCode::SUCCESS {
+            failed = true;
+        }
+    }
+
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_batched_tweak_serialization() {
+        let commands = vec![
+            BatchedTweakCommand::SysctlWrite("vm.max_map_count".to_string(), "8388608".to_string()),
+            BatchedTweakCommand::SysfsWrite("/sys/kernel/mm/transparent_hugepage/enabled".to_string(), "madvise".to_string()),
+        ];
+
+        let json = serde_json::to_string(&commands).unwrap();
+        let parsed: Vec<BatchedTweakCommand> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.len(), 2);
+    }
 }

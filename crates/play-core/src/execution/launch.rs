@@ -159,8 +159,10 @@ impl LaunchModule {
         // Poll for process stability with /proc verification
         let mut stable_count = 0;
         let required_stable_checks = (LAUNCH_STABILIZE_SECS / POLL_INTERVAL_SECS) as usize;
+        // Early-exit threshold: 3 consecutive stable checks indicate process is truly stable
+        const EARLY_EXIT_THRESHOLD: usize = 3;
 
-        for _ in 0..required_stable_checks {
+        for iteration in 0..required_stable_checks {
             std::thread::sleep(Duration::from_secs(POLL_INTERVAL_SECS));
 
             // Check if spawned process still exists
@@ -202,6 +204,18 @@ impl LaunchModule {
                     if proc_exists {
                         stable_count += 1;
                         tracing::debug!(pid, stable_count, "Process still running and verified in /proc");
+
+                        // Early-exit: if we have enough consecutive stable checks, process is verified
+                        if stable_count >= EARLY_EXIT_THRESHOLD {
+                            tracing::info!(
+                                pid,
+                                stable_count,
+                                elapsed_secs = (iteration as u64 + 1) * POLL_INTERVAL_SECS,
+                                "Process verified stable after {} checks - early exit from polling loop",
+                                stable_count
+                            );
+                            break;
+                        }
                     } else {
                         return Err(PlayError::GameLaunchFailed {
                             exe_path: exe_path.clone(),

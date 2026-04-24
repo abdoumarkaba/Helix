@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use crate::guards::governor::GovernorGuard;
 use crate::guards::gpu_perf::GpuPerfGuard;
-use crate::models::environment::HardwareProfile;
+use crate::models::environment::{BatchedTweakCommand, HardwareProfile};
 use crate::models::errors::PlayError;
 use crate::models::plan::{PlannedTweak, SystemTweak, TweakDecision};
 use crate::modules::detection::CommandRunner;
@@ -67,35 +67,114 @@ impl SystemModule {
         Self { sys_root, cmd_runner }
     }
 
-    /// Apply all `TweakDecision::Apply` entries from the plan.
+    /// Apply all planned system tweaks.
     ///
-    /// Returns `ActiveGuards` holding session-scoped Drop guards.
-    /// Class B persistent tweaks are written immediately via play-helper.
+    /// Class A tweaks (session-scoped) use RAII guards returned in `ActiveGuards`.
+    /// Class B tweaks (persistent) are batched and written via play-helper.
     ///
-    /// On failure, partial guards are dropped (restoring what was applied)
-    /// and the error is returned.
-    pub fn apply(
+    /// Returns `ActiveGuards` containing session-scoped guards.
+    ///
+    /// # Errors
+    ///
+    /// Returns `PlayError::SystemTweakFailed` if any tweak fails.
+    pub fn apply_tweaks(
         &self,
-        plan_tweaks: &[PlannedTweak],
+        tweaks: &[PlannedTweak],
         hw: &HardwareProfile,
     ) -> Result<ActiveGuards, PlayError> {
         let mut governor_guard: Option<GovernorGuard> = None;
         let mut gpu_perf_guard: Option<GpuPerfGuard> = None;
+        let mut class_b_commands: Vec<BatchedTweakCommand> = Vec::new();
 
-        for tweak in plan_tweaks {
-            if let TweakDecision::Apply(ref sys_tweak) = tweak.decision {
-                if let Err(e) =
-                    self.apply_one(sys_tweak, hw, &mut governor_guard, &mut gpu_perf_guard)
-                {
-                    // Partial guards drop here, restoring what was applied.
-                    drop(governor_guard);
-                    drop(gpu_perf_guard);
-                    return Err(e);
+        for planned_tweak in tweaks {
+            if let TweakDecision::Apply(sys_tweak) = &planned_tweak.decision {
+                // Separate Class A (guards) from Class B (batched)
+                match sys_tweak {
+                    // Class A: session-scoped guards
+                    SystemTweak::CpuGovernorPerformance
+                    | SystemTweak::NvidiaPersistenceMode
+                    | SystemTweak::NvidiaClockLock { .. }
+                    | SystemTweak::Fsync
+                    | SystemTweak::Esync
+                    | SystemTweak::GameMode
+                    | SystemTweak::DxvkAsync { .. } => {
+                        if let Err(e) = self.apply_one(sys_tweak, hw, &mut governor_guard, &mut gpu_perf_guard)
+                        {
+                            drop(governor_guard);
+                            drop(gpu_perf_guard);
+                            return Err(e);
+                        }
+                    },
+                    // Class B: collect for batching
+                    SystemTweak::VmMaxMapCount { target } => {
+                        class_b_commands.push(BatchedTweakCommand::SysctlWrite(
+                            "vm.max_map_count".to_string(),
+                            target.to_string(),
+                        ));
+                    },
+                    SystemTweak::ThpMadvise => {
+                        class_b_commands.push(BatchedTweakCommand::SysfsWrite(
+                            "/sys/kernel/mm/transparent_hugepage/enabled".to_string(),
+                            "madvise".to_string(),
+                        ));
+                    },
+                    SystemTweak::SchedAutogroup { enabled } => {
+                        // Check if kernel parameter exists
+                        let sysctl_path = "/proc/sys/kernel/sched_autogroup";
+                        if !self.sysctl_exists(sysctl_path) {
+                            tracing::warn!("Kernel parameter {} does not exist on this system - skipping tweak", sysctl_path);
+                            continue;
+                        }
+                        let val = if *enabled { "1" } else { "0" };
+                        class_b_commands.push(BatchedTweakCommand::SysctlWrite(
+                            "kernel.sched_autogroup".to_string(),
+                            val.to_string(),
+                        ));
+                    },
+                    SystemTweak::SplitLockMitigate { enabled } => {
+                        let val = if *enabled { "0" } else { "1" };
+                        class_b_commands.push(BatchedTweakCommand::SysctlWrite(
+                            "kernel.split_lock_mitigate".to_string(),
+                            val.to_string(),
+                        ));
+                    },
+                    SystemTweak::UlimitNofile { value } => {
+                        // Ulimit is handled separately via write_limits_d
+                        // Not batched with sysctl/sysfs since it uses different file path
+                        if let Err(e) = self.write_limits_d(*value) {
+                            tracing::warn!("Ulimit write failed: {}", e);
+                        }
+                    },
                 }
             }
         }
 
+        // Execute batched Class B tweaks in single pkexec call
+        if !class_b_commands.is_empty() {
+            self.apply_batched_tweaks(&class_b_commands)?;
+        }
+
         Ok(ActiveGuards { governor: governor_guard, gpu_perf: gpu_perf_guard })
+    }
+
+    /// Apply batched Class B tweaks via single pkexec call.
+    fn apply_batched_tweaks(&self, commands: &[BatchedTweakCommand]) -> Result<(), PlayError> {
+        let json = serde_json::to_string(commands).map_err(|e| PlayError::SysctlWrite {
+            key: "batch".to_string(),
+            reason: format!("Failed to serialize batch commands: {e}"),
+        })?;
+
+        match self.cmd_runner.run_command("pkexec", &["play-helper", "batch", &json]) {
+            Ok(_) => {
+                tracing::info!("Batched {} system tweaks applied successfully", commands.len());
+                Ok(())
+            },
+            Err(e) => {
+                tracing::warn!("Batched system tweaks failed (requires elevated helper): {}", e);
+                tracing::warn!("Game may still work but with suboptimal performance");
+                Ok(())
+            }
+        }
     }
 
     /// Dispatch a single tweak. No match on tweak name in business logic —
@@ -418,7 +497,7 @@ mod tests {
             rationale: "test".to_owned(),
         }];
 
-        let guards = module.apply(&tweaks, &hw).unwrap();
+        let guards = module.apply_tweaks(&tweaks, &hw).unwrap();
         assert!(guards.governor.is_some());
         assert!(guards.governor.unwrap().is_active());
     }
@@ -447,7 +526,7 @@ mod tests {
             },
         ];
 
-        let guards = module.apply(&tweaks, &hw).unwrap();
+        let guards = module.apply_tweaks(&tweaks, &hw).unwrap();
         assert!(guards.gpu_perf.is_some());
         assert!(guards.gpu_perf.unwrap().is_active());
     }
@@ -465,7 +544,7 @@ mod tests {
             rationale: "test".to_owned(),
         }];
 
-        let guards = module.apply(&tweaks, &hw).unwrap();
+        let guards = module.apply_tweaks(&tweaks, &hw).unwrap();
         assert!(!guards.is_active()); // Class B has no session guards
 
         let calls = runner.calls();
@@ -494,7 +573,7 @@ mod tests {
             },
         ];
 
-        let guards = module.apply(&tweaks, &hw).unwrap();
+        let guards = module.apply_tweaks(&tweaks, &hw).unwrap();
         assert!(!guards.is_active());
         assert!(runner.calls().is_empty());
     }
@@ -535,7 +614,7 @@ mod tests {
         ];
 
         // Should NOT error - graceful degradation
-        let result = module.apply(&tweaks, &hw);
+        let result = module.apply_tweaks(&tweaks, &hw);
         assert!(result.is_ok());
         // Governor guard should still be active (not dropped due to graceful degradation)
         let guards = result.unwrap();
@@ -569,8 +648,21 @@ mod tests {
             },
         ];
 
-        let guards = module.apply(&tweaks, &hw).unwrap();
+        let guards = module.apply_tweaks(&tweaks, &hw).unwrap();
         assert!(!guards.is_active());
         assert!(runner.calls().is_empty());
+    }
+
+    #[test]
+    fn test_batched_tweak_serialization() {
+        let commands = vec![
+            BatchedTweakCommand::SysctlWrite("vm.max_map_count".to_string(), "8388608".to_string()),
+            BatchedTweakCommand::SysfsWrite("/sys/kernel/mm/transparent_hugepage/enabled".to_string(), "madvise".to_string()),
+        ];
+
+        let json = serde_json::to_string(&commands).unwrap();
+        let parsed: Vec<BatchedTweakCommand> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.len(), 2);
     }
 }

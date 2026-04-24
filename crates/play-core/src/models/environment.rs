@@ -517,6 +517,32 @@ pub enum Confidence {
     Inferred,
 }
 
+// ---------------------------------------------------------------------------
+// Steam Installation
+// ---------------------------------------------------------------------------
+
+/// Detected Steam installation information.
+#[derive(Debug, Clone)]
+pub struct SteamInstallation {
+    /// Path to Steam installation directory
+    pub path: PathBuf,
+}
+
+// ---------------------------------------------------------------------------
+// Batched System Tweak Commands
+// ---------------------------------------------------------------------------
+
+/// Batched system tweak command for play-helper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BatchedTweakCommand {
+    /// Write sysctl value: (key, value)
+    SysctlWrite(String, String),
+    /// Write sysfs value: (path, value)
+    SysfsWrite(String, String),
+    /// Write ulimit: value
+    UlimitNofile(u64),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DecisionSource {
     Database,
