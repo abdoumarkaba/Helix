@@ -164,6 +164,9 @@ impl SystemModule {
             },
 
             SystemTweak::SplitLockMitigate { enabled } => {
+                // Kernel semantics: 1 = mitigate (enabled), 0 = off (disabled)
+                // We want to DISABLE mitigation for gaming (enabled=false means mitigation off)
+                // So when enabled=true (apply tweak), we write 0 to disable mitigation
                 let val = if *enabled { "0" } else { "1" };
                 self.write_sysctl("kernel.split_lock_mitigate", val)
             },

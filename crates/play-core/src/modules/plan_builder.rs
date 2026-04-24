@@ -203,6 +203,35 @@ impl<'a> PlanBuilder<'a> {
         env.launch.exe_path = exe_path.clone();
         env.launch.working_dir = working_dir.clone();
 
+        // BUG-2 fix: Set Steam compatibility environment variables for Proton runners
+        // Proton requires STEAM_COMPAT_DATA_PATH instead of WINEPREFIX
+        let prefix_path = env.prefix.path.clone();
+        match runner_type {
+            crate::models::environment::RunnerType::ProtonGE
+            | crate::models::environment::RunnerType::ProtonOfficial => {
+                // Proton uses STEAM_COMPAT_DATA_PATH for the prefix
+                env.launch.env.insert("STEAM_COMPAT_DATA_PATH".to_owned(), prefix_path.to_string_lossy().to_string());
+                // STEAM_COMPAT_CLIENT_INSTALL_PATH is required but can be empty for non-Steam games
+                env.launch.env.insert("STEAM_COMPAT_CLIENT_INSTALL_PATH".to_owned(), "/dev/null".to_owned());
+                // Enable Proton logging for debugging (BUG-6)
+                env.launch.env.insert("PROTON_LOG".to_owned(), "1".to_owned());
+                // Reduce Wine debug output noise (BUG-6)
+                env.launch.env.insert("WINEDEBUG".to_owned(), "-all".to_owned());
+                info!("Proton environment configured: STEAM_COMPAT_DATA_PATH={}", prefix_path.display());
+            },
+            crate::models::environment::RunnerType::WineGE
+            | crate::models::environment::RunnerType::WineStaging
+            | crate::models::environment::RunnerType::SodaWine => {
+                // Wine uses WINEPREFIX for the prefix
+                env.launch.env.insert("WINEPREFIX".to_owned(), prefix_path.to_string_lossy().to_string());
+                // Enable Wine logging for debugging
+                env.launch.env.insert("WINEDEBUG".to_owned(), "-all".to_owned());
+            },
+        }
+
+        // Get ulimit_nofile from system tuning (computed from tweaks)
+        let ulimit_nofile = env.system.ulimit_nofile;
+
         let launch_action = LaunchAction::Spawn {
             exe_path,
             working_dir,
@@ -210,6 +239,7 @@ impl<'a> PlanBuilder<'a> {
             env: env.launch.env.clone(),
             runner_path: runner_install_path,
             runner_type: env.runner.runner_type,
+            ulimit_nofile, // BUG-4: Pass ulimit to launch for setrlimit
         };
 
         Ok(GamePlan {
@@ -395,6 +425,7 @@ impl<'a> PlanBuilder<'a> {
                 env: self.env.launch.env.clone(),
                 runner_path: PathBuf::new(),
                 runner_type: self.env.runner.runner_type,
+                ulimit_nofile: None,
             },
             tweaks: Vec::new(),
             db_hit,

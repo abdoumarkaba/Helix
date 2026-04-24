@@ -543,11 +543,11 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
         let driver_str = parts[2].trim();
 
         // Parse VRAM (format: "4096 MiB")
+        // nvidia-smi returns memory.total in MiB, so we keep the value as-is
         let vram_mb = vram_str
             .split_whitespace()
             .next()
             .and_then(|s| s.parse::<u32>().ok())
-            .map(|v| v / 1024) // Convert MiB to GiB roughly, or keep as MiB
             .unwrap_or(0);
 
         // Parse driver version (NVIDIA format like "580.142" doesn't match semver)

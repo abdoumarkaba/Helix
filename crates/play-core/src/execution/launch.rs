@@ -6,12 +6,17 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use nix::sys::resource::{setrlimit, Resource};
+
 use crate::models::environment::RunnerType;
 use crate::models::errors::PlayError;
 use crate::models::plan::LaunchAction;
 
 /// Seconds to wait for game process to stabilize after launch.
 const LAUNCH_STABILIZE_SECS: u64 = 12;
+
+/// Seconds between polling checks during stabilization.
+const POLL_INTERVAL_SECS: u64 = 2;
 
 /// Module responsible for spawning the game process.
 pub struct LaunchModule;
@@ -37,7 +42,16 @@ impl LaunchModule {
                 env,
                 runner_path,
                 runner_type,
-            } => Self::spawn_game(exe_path, working_dir, args, env, runner_path, *runner_type),
+                ulimit_nofile,
+            } => Self::spawn_game(
+                exe_path,
+                working_dir,
+                args,
+                env,
+                runner_path,
+                *runner_type,
+                *ulimit_nofile,
+            ),
         }
     }
 
@@ -48,6 +62,7 @@ impl LaunchModule {
         env: &indexmap::IndexMap<String, String>,
         runner_path: &PathBuf,
         runner_type: RunnerType,
+        ulimit_nofile: Option<u64>,
     ) -> Result<Child, PlayError> {
         // Verify runner exists
         if !runner_path.exists() {
@@ -100,6 +115,20 @@ impl LaunchModule {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // BUG-4: Apply ulimit before spawn (not via limits.d which only affects new PAM sessions)
+        if let Some(nofile) = ulimit_nofile {
+            // Set both soft and hard limit for max open files
+            if let Err(e) = setrlimit(Resource::RLIMIT_NOFILE, nofile, nofile) {
+                tracing::warn!(
+                    "Failed to set RLIMIT_NOFILE to {} (non-fatal): {}",
+                    nofile,
+                    e
+                );
+            } else {
+                tracing::info!("Set RLIMIT_NOFILE to {}", nofile);
+            }
+        }
+
         // Spawn the process
         let mut child = cmd.spawn().map_err(|e| {
             let reason = if e.kind() == std::io::ErrorKind::PermissionDenied {
@@ -124,28 +153,127 @@ impl LaunchModule {
             }
         })?;
 
-        // Wait for process to stabilize
-        std::thread::sleep(Duration::from_secs(LAUNCH_STABILIZE_SECS));
+        let pid = child.id();
+        tracing::info!(pid, "Process spawned, beginning stabilization check");
 
-        // Check if process is still running
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                // Process exited during stabilization period
-                return Err(PlayError::GameLaunchFailed {
-                    exe_path: exe_path.clone(),
-                    reason: format!("game exited during launch (code: {:?})", status.code()),
-                });
-            },
-            Ok(None) => {
-                // Process still running - launch verified
-                tracing::info!(pid = child.id(), "Game launched successfully and stabilized");
-            },
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to check process status during verification");
-            },
+        // Poll for process stability with /proc verification
+        let mut stable_count = 0;
+        let required_stable_checks = (LAUNCH_STABILIZE_SECS / POLL_INTERVAL_SECS) as usize;
+
+        for _ in 0..required_stable_checks {
+            std::thread::sleep(Duration::from_secs(POLL_INTERVAL_SECS));
+
+            // Check if spawned process still exists
+            let proc_exists = std::path::Path::new(&format!("/proc/{}", pid)).exists();
+
+            // Check if spawned process has exited
+            let process_status = child.try_wait();
+
+            match process_status {
+                Ok(Some(status)) => {
+                    // Spawned process exited - check if it daemonized
+                    if proc_exists {
+                        tracing::warn!(
+                            pid,
+                            exit_code = ?status.code(),
+                            "Spawned process exited but /proc entry still exists - possible race condition"
+                        );
+                    } else {
+                        // Process truly exited - check for children (daemonization)
+                        if Self::has_child_processes(pid) {
+                            tracing::info!(
+                                parent_pid = pid,
+                                "Parent process exited but children remain - likely daemonized successfully"
+                            );
+                            stable_count += 1;
+                        } else {
+                            return Err(PlayError::GameLaunchFailed {
+                                exe_path: exe_path.clone(),
+                                reason: format!(
+                                    "game process exited during launch (code: {:?}) with no child processes",
+                                    status.code()
+                                ),
+                            });
+                        }
+                    }
+                },
+                Ok(None) => {
+                    // Process still running - verify it actually exists in /proc
+                    if proc_exists {
+                        stable_count += 1;
+                        tracing::debug!(pid, stable_count, "Process still running and verified in /proc");
+                    } else {
+                        return Err(PlayError::GameLaunchFailed {
+                            exe_path: exe_path.clone(),
+                            reason: format!(
+                                "process handle reports running but /proc/{} missing - zombie process",
+                                pid
+                            ),
+                        });
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to check process status during verification");
+                },
+            }
+        }
+
+        // Require at least 50% of checks to pass
+        if stable_count >= required_stable_checks / 2 {
+            tracing::info!(
+                pid,
+                stable_checks = stable_count,
+                total_checks = required_stable_checks,
+                "Game launched successfully and stabilized"
+            );
+        } else {
+            return Err(PlayError::GameLaunchFailed {
+                exe_path: exe_path.clone(),
+                reason: format!(
+                    "process failed stability check: only {}/{} checks passed",
+                    stable_count, required_stable_checks
+                ),
+            });
         }
 
         Ok(child)
+    }
+
+    /// Check if a process has any child processes by reading /proc.
+    ///
+    /// This handles the case where Proton/Wine daemonizes - the parent exits
+    /// but spawns child processes that continue running.
+    fn has_child_processes(parent_pid: u32) -> bool {
+        let proc_path = std::path::Path::new("/proc");
+
+        if let Ok(entries) = proc_path.read_dir() {
+            for entry in entries.flatten() {
+                if let Ok(pid_str) = entry.file_name().to_string_lossy().parse::<u32>() {
+                    if pid_str == parent_pid {
+                        continue; // Skip the parent itself
+                    }
+
+                    // Check if this process has our parent as its PPID
+                    let status_path = entry.path().join("status");
+                    if let Ok(status_content) = std::fs::read_to_string(&status_path) {
+                        for line in status_content.lines() {
+                            if line.starts_with("PPid:") {
+                                let ppid_str = line.split(':').nth(1).unwrap_or("0").trim();
+                                if let Ok(ppid) = ppid_str.parse::<u32>() {
+                                    if ppid == parent_pid {
+                                        tracing::debug!(child_pid = pid_str, parent_pid, "Found child process");
+                                        return true;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
     }
 }
 
@@ -177,6 +305,7 @@ mod tests {
             env: indexmap::IndexMap::new(),
             runner_path: runner_path.clone(),
             runner_type: RunnerType::ProtonGE,
+            ulimit_nofile: None,
         };
 
         let _module = LaunchModule::new();
@@ -203,6 +332,7 @@ mod tests {
             env: indexmap::IndexMap::new(),
             runner_path: PathBuf::from("/nonexistent/runner"),
             runner_type: RunnerType::ProtonGE,
+            ulimit_nofile: None,
         };
 
         let module = LaunchModule::new();
@@ -229,6 +359,7 @@ mod tests {
             env: indexmap::IndexMap::new(),
             runner_path: runner_path.clone(),
             runner_type: RunnerType::WineGE,
+            ulimit_nofile: None,
         };
 
         let module = LaunchModule::new();

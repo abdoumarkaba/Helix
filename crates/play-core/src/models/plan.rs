@@ -198,6 +198,8 @@ pub enum LaunchAction {
         env: IndexMap<String, String>,
         runner_path: PathBuf,
         runner_type: RunnerType,
+        /// Ulimit nofile value to set before spawn (BUG-4: setrlimit instead of limits.d)
+        ulimit_nofile: Option<u64>,
     },
 }
 
