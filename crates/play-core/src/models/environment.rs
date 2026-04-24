@@ -534,12 +534,16 @@ pub struct SteamInstallation {
 
 /// Batched system tweak command for play-helper.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
 pub enum BatchedTweakCommand {
     /// Write sysctl value: (key, value)
+    #[serde(rename = "sysctl_write")]
     SysctlWrite(String, String),
     /// Write sysfs value: (path, value)
+    #[serde(rename = "sysfs_write")]
     SysfsWrite(String, String),
     /// Write ulimit: value
+    #[serde(rename = "ulimit_nofile")]
     UlimitNofile(u64),
 }
 
