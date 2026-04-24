@@ -135,10 +135,11 @@ Polkit policy: `/usr/share/polkit-1/actions/com.github.abdoumarkt.play.policy`
 - Package installation
 - Kernel parameter existence checks (sched_autogroup)
 - Helpful error messages for permission issues
+- **Game launch and execution**, RimWorld for test (verified working: 90fps @ 30% GPU usage)
 
-### ✅ Recent Fix
+### ✅ Recent Fixes
 
-**Issue: Game launch fails with "Permission denied (os error 13)"**
+**1. Permission denied error (os error 13)**
 
 **Root Cause:**
 Runner path was pointing to the Proton directory (`/path/to/GE-Proton10-34`) instead of the actual proton binary (`/path/to/GE-Proton10-34/proton`).
@@ -148,6 +149,67 @@ Updated `decision_engine.rs` to append `/proton` to the path when resolving `Run
 
 **Status:**
 Fixed. Runner now correctly points to the proton binary executable.
+
+---
+
+**2. Launch verification false positives**
+
+**Root Cause:**
+`try_wait()` on spawned child handle didn't detect Proton/Wine daemonization (parent exits, child continues). This caused false "launch successful" messages when the process had actually exited.
+
+**Fix Applied:**
+Implemented multi-layered verification in `launch.rs`:
+- Polling checks every 2 seconds for 12 seconds
+- `/proc/<pid>` existence verification
+- Child process detection for daemonized runners
+- Requires 50% of checks to pass for success
+
+**Status:**
+Fixed. Launch verification now correctly detects daemonization and zombie processes.
+
+---
+
+**3. Ulimit application timing**
+
+**Root Cause:**
+Writing to `/etc/security/limits.d/play.conf` only affects new PAM sessions, not the current game process.
+
+**Fix Applied:**
+Changed from limits.d file writing to direct `setrlimit()` call before spawning game process in `launch.rs`.
+
+**Status:**
+Fixed. Ulimit now applies to the game process immediately.
+
+### 🚧 Known Issues / Blockers
+
+**1. Long startup time (~10 minutes)**
+
+**Symptoms:**
+- RimWorld took ~10 minutes from launch to playable state
+- 2-minute stall at 0fps during initial launch (MangoHud)
+- Wayland compositor shows "not responding" dialog during stalls
+- Game eventually stabilizes at 90fps with 30% GPU usage
+
+**Root Cause:**
+- First-run shader compilation by Proton/DXVK
+- Large games have thousands of Vulkan shaders that compile on-demand
+- Wayland compositor ping timeout (~5 seconds) triggers during heavy I/O
+- No frame submission during shader compilation/loading phases
+
+**Impact:**
+- User experience: poor (long wait, confusing dialogs)
+- Game functionality: works correctly after compilation
+- Performance: excellent once loaded (90fps stable)
+
+**Potential Mitigations:**
+- Pre-compile shaders using DXVK cache tools
+- Increase Wayland compositor timeout (user configuration)
+- Add loading screen overlay to keep compositor happy
+- Detect first-run and warn users about expected delay
+- Set `PROTON_NO_ESYNC=1` if esync causes hangs (not yet implemented)
+
+**Status:**
+Known limitation of Proton/Wine on first launch. Not a blocker for core functionality, but UX issue.
 
 ## Key Data Structures
 
