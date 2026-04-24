@@ -15,6 +15,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 
+use play_core::execution::mangohud::MangoHudParser;
 use play_core::models::environment::GameEnvironment;
 use play_core::models::errors::PlayError;
 use play_core::models::metrics::SessionMetrics;
@@ -69,6 +70,10 @@ struct CliArgs {
     /// Generate shell completions (bash, zsh, fish)
     #[arg(long, value_name = "SHELL")]
     generate_completion: Option<String>,
+
+    /// Review MangoHud logs from previous game runs
+    #[arg(long)]
+    review_mangohud: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +292,209 @@ fn show_log_path(_log_path: &Path) {
 }
 
 // ---------------------------------------------------------------------------
+// Review MangoHud Logs
+// ---------------------------------------------------------------------------
+
+fn review_mangohud_logs() -> Result<(), PlayError> {
+    let log_dir = data_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+        .join("play/logs");
+
+    if !log_dir.exists() {
+        eprintln!("{} No MangoHud logs directory found: {}", style("Error:").red().bold(), log_dir.display());
+        eprintln!("  Run a game with MangoHud enabled to generate logs");
+        return Ok(());
+    }
+
+    // Find all MangoHud CSV files
+    let entries = std::fs::read_dir(&log_dir).map_err(|e| PlayError::ValidationFailed {
+        reason: format!("Failed to read log directory: {e}"),
+    })?;
+
+    let mut log_files: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("csv"))
+        .filter(|e| e.file_name().to_string_lossy().starts_with("mangohud_"))
+        .map(|e| e.path())
+        .collect();
+
+    if log_files.is_empty() {
+        eprintln!("{} No MangoHud log files found in: {}", style("Info:").cyan(), log_dir.display());
+        eprintln!("  Run a game with MangoHud enabled to generate logs");
+        return Ok(());
+    }
+
+    // Sort by modification time (newest first)
+    log_files.sort_by(|a, b| {
+        let a_time = std::fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+        let b_time = std::fs::metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+        b_time.cmp(&a_time)
+    });
+
+    println!("{} Found {} MangoHud log file(s)", style("MangoHud Logs:").green().bold(), log_files.len());
+    println!();
+
+    for (idx, log_path) in log_files.iter().enumerate() {
+        let file_name = log_path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+
+        // Get file metadata
+        let metadata = std::fs::metadata(log_path).map_err(|e| PlayError::ValidationFailed {
+            reason: format!("Failed to read log metadata: {e}"),
+        })?;
+        let modified = metadata.modified().ok().map(|t| {
+            chrono::DateTime::<chrono::Local>::from(t).format("%Y-%m-%d %H:%M:%S").to_string()
+        });
+        let size = metadata.len();
+
+        println!("  {}. {}", style(idx + 1).cyan(), style(file_name).bold());
+        if let Some(mod_str) = modified {
+            println!("     Modified: {}", mod_str);
+        }
+        println!("     Size: {} bytes", size);
+
+        // Try to parse and show summary
+        match MangoHudParser::parse_csv(log_path, file_name.to_string()) {
+            Ok(session) => {
+                if let Some(fps_stats) = session.fps_stats {
+                    println!("     {} FPS: avg={:.1}, min={:.1}, max={:.1}, 1% low={:.1}",
+                        style("✓").green(),
+                        fps_stats.avg, fps_stats.min, fps_stats.max, fps_stats.percentile_1
+                    );
+                }
+                println!("     Samples: {}", session.samples.len());
+            },
+            Err(e) => {
+                println!("     {} Failed to parse: {}", style("⚠").yellow(), e);
+            }
+        }
+        println!();
+    }
+
+    // Ask which log to review in detail
+    if log_files.len() == 1 {
+        review_single_log(&log_files[0])?;
+    } else {
+        eprintln!("{} Enter log number to review (1-{}), or 0 to exit: ", style("Select:").cyan(), log_files.len());
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).ok();
+
+        if let Ok(num) = input.trim().parse::<usize>() {
+            if num == 0 {
+                println!("{} Exited", style("Info:").cyan());
+                return Ok(());
+            }
+            if num >= 1 && num <= log_files.len() {
+                review_single_log(&log_files[num - 1])?;
+            } else {
+                eprintln!("{} Invalid selection", style("Error:").red().bold());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
+    let file_name = log_path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+
+    println!("\n{} {}", style("Reviewing:").cyan().bold(), style(file_name).bold());
+    println!("{}", style("─".repeat(60)).dim());
+
+    let session = MangoHudParser::parse_csv(log_path, file_name.to_string())?;
+
+    println!("\n{}", style("Session Summary").green().bold());
+    println!("  Game: {}", session.game_name);
+    println!("  Started: {}", session.started_at.format("%Y-%m-%d %H:%M:%S UTC"));
+    if let Some(ended) = session.ended_at {
+        let duration = (ended - session.started_at).num_seconds();
+        println!("  Duration: {} seconds", duration);
+    }
+    println!("  Samples: {}", session.samples.len());
+
+    // Print FPS statistics
+    if let Some(fps) = session.fps_stats {
+        println!("\n{}", style("FPS Statistics").green().bold());
+        println!("  Average: {:.2}", fps.avg);
+        println!("  Minimum: {:.2}", fps.min);
+        println!("  Maximum: {:.2}", fps.max);
+        println!("  1% Low: {:.2}", fps.percentile_1);
+        println!("  0.1% Low: {:.2}", fps.percentile_0_1);
+    }
+
+    // Print frametime statistics
+    if let Some(ft) = session.frametime_stats {
+        println!("\n{}", style("Frametime Statistics").green().bold());
+        println!("  Average: {:.2} ms", ft.avg);
+        println!("  Minimum: {:.2} ms", ft.min);
+        println!("  Maximum: {:.2} ms", ft.max);
+        println!("  1% Low: {:.2} ms", ft.percentile_1);
+        println!("  0.1% Low: {:.2} ms", ft.percentile_0_1);
+    }
+
+    // Print CPU statistics
+    if let Some(cpu) = session.cpu_stats {
+        println!("\n{}", style("CPU Load Statistics").green().bold());
+        println!("  Average: {:.1}%", cpu.avg);
+        println!("  Minimum: {:.1}%", cpu.min);
+        println!("  Maximum: {:.1}%", cpu.max);
+    }
+
+    // Print GPU statistics
+    if let Some(gpu) = session.gpu_stats {
+        println!("\n{}", style("GPU Load Statistics").green().bold());
+        println!("  Average: {:.1}%", gpu.avg);
+        println!("  Minimum: {:.1}%", gpu.min);
+        println!("  Maximum: {:.1}%", gpu.max);
+    }
+
+    // Print RAM statistics
+    if let Some(ram) = session.ram_stats {
+        println!("\n{}", style("RAM Usage Statistics").green().bold());
+        println!("  Average: {:.1} MiB", ram.avg);
+        println!("  Minimum: {:.1} MiB", ram.min);
+        println!("  Maximum: {:.1} MiB", ram.max);
+    }
+
+    // Print VRAM statistics
+    if let Some(vram) = session.vram_stats {
+        println!("\n{}", style("VRAM Usage Statistics").green().bold());
+        println!("  Average: {:.1} MiB", vram.avg);
+        println!("  Minimum: {:.1} MiB", vram.min);
+        println!("  Maximum: {:.1} MiB", vram.max);
+    }
+
+    // Show sample data (first and last 5)
+    if session.samples.len() > 10 {
+        println!("\n{}", style("Sample Data (first 5)").green().bold());
+        for sample in session.samples.iter().take(5) {
+            println!("  [{:6}ms] FPS: {:6.1} | CPU: {:5.1}% | GPU: {:5.1}% | RAM: {:6.0} MiB | VRAM: {:6.0} MiB",
+                sample.time_ms,
+                sample.fps,
+                sample.cpu_load,
+                sample.gpu_load,
+                sample.ram_mib,
+                sample.vram_mib
+            );
+        }
+
+        println!("\n{}", style("Sample Data (last 5)").green().bold());
+        for sample in session.samples.iter().rev().take(5).rev() {
+            println!("  [{:6}ms] FPS: {:6.1} | CPU: {:5.1}% | GPU: {:5.1}% | RAM: {:6.0} MiB | VRAM: {:6.0} MiB",
+                sample.time_ms,
+                sample.fps,
+                sample.cpu_load,
+                sample.gpu_load,
+                sample.ram_mib,
+                sample.vram_mib
+            );
+        }
+    }
+
+    println!("\n{}", style("─".repeat(60)).dim());
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Write Metrics
 // ---------------------------------------------------------------------------
 
@@ -443,6 +651,17 @@ fn main() {
         println!("  Version: {}", env!("CARGO_PKG_VERSION"));
         println!();
         return;
+    }
+
+    // Handle MangoHud review command (doesn't require exe_path)
+    if args.review_mangohud {
+        match review_mangohud_logs() {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("{} {}", style("Error:").red().bold(), e);
+                std::process::exit(1);
+            },
+        }
     }
 
     // Validate exe_path for remaining commands (needed for log filename)

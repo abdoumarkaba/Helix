@@ -5,7 +5,7 @@
 /// Nothing is written to the filesystem here.
 use std::path::PathBuf;
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::models::environment::{
     GameEnvironment, ResolutionDecision, SystemTuning, TranslationLayer,
@@ -187,6 +187,35 @@ impl<'a> PlanBuilder<'a> {
         if self.env.graphics.mangohud.as_ref().is_some_and(|m| m.enabled) {
             env.launch.env.insert("MANGOHUD".to_owned(), "1".to_owned());
             info!("MangoHud auto-enabled (installed and detected)");
+
+            // Configure MangoHud logging for detailed metrics capture
+            let log_dir = dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join("play/logs");
+            let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+            let log_path = log_dir.join(format!("mangohud_{}.csv", timestamp));
+
+            // Create log directory if it doesn't exist
+            if let Err(e) = std::fs::create_dir_all(&log_dir) {
+                warn!("Failed to create MangoHud log directory {}: {}", log_dir.display(), e);
+            } else {
+                // Configure MangoHud to log to file
+                env.launch.env.insert("MANGOHUD_CONFIGFILE".to_owned(), log_path.display().to_string());
+                env.launch.env.insert("MANGOHUD_LOG".to_owned(), "1".to_string());
+
+                // Enable all metrics for detailed logging
+                env.launch.env.insert("MANGOHUD_CPU".to_owned(), "1".to_string());
+                env.launch.env.insert("MANGOHUD_GPU".to_owned(), "1".to_string());
+                env.launch.env.insert("MANGOHUD_RAM".to_owned(), "1".to_string());
+                env.launch.env.insert("MANGOHUD_VRAM".to_owned(), "1".to_string());
+                env.launch.env.insert("MANGOHUD_TEMP".to_owned(), "1".to_string());
+                env.launch.env.insert("MANGOHUD_FPS".to_owned(), "1".to_string());
+                env.launch.env.insert("MANGOHUD_FRAMETIME".to_owned(), "1".to_string());
+                env.launch.env.insert("MANGOHUD_FAN".to_owned(), "1".to_string());
+                env.launch.env.insert("MANGOHUD_POWER".to_owned(), "1".to_string());
+
+                info!("MangoHud logging configured: {}", log_path.display());
+            }
         }
 
         // Log completion stats before moving decisions
