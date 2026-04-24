@@ -136,27 +136,18 @@ Polkit policy: `/usr/share/polkit-1/actions/com.github.abdoumarkt.play.policy`
 - Kernel parameter existence checks (sched_autogroup)
 - Helpful error messages for permission issues
 
-### ⚠️ Current Blocker
+### ✅ Recent Fix
 
 **Issue: Game launch fails with "Permission denied (os error 13)"**
 
-**Symptoms:**
-- File has execute permissions (`ls -l` shows `*`)
-- Mount does NOT have `noexec` flag
-- Runner path correctly resolved to Proton
-- Error occurs when spawning Windows .exe
+**Root Cause:**
+Runner path was pointing to the Proton directory (`/path/to/GE-Proton10-34`) instead of the actual proton binary (`/path/to/GE-Proton10-34/proton`).
 
-**Root Cause (Suspected):**
-SELinux context blocking execution of Windows executables on external drive (`/run/media/abdoufoundit/forgames`). The mount shows `seclabel` option, indicating SELinux is active.
+**Fix Applied:**
+Updated `decision_engine.rs` to append `/proton` to the path when resolving `RunnerAction::AlreadyInstalled` from Steam compatibility tools directory.
 
-**Next Investigation Steps:**
-1. Check SELinux context: `ls -Z /run/media/abdoufoundit/forgames/Games/RimWorld/RimWorldWin64.exe`
-2. Check SELinux audit logs: `ausearch -m avc -ts recent`
-3. Test with SELinux permissive mode: `sudo setenforce 0`
-4. If SELinux is the issue, add policy or use `chcon` to fix context
-
-**Alternative Workaround:**
-Copy game to home directory where SELinux context is correct.
+**Status:**
+Fixed. Runner now correctly points to the proton binary executable.
 
 ## Key Data Structures
 

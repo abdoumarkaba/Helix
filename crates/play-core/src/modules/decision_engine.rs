@@ -339,7 +339,7 @@ impl DecisionEngine {
                     let parts: Vec<&str> = version_str.split('.').collect();
                     if parts.len() >= 2 {
                         let proton_dir_name = format!("GE-Proton{}-{}", parts[0], parts[1]);
-                        let proton_path = compat_dir.join(&proton_dir_name);
+                        let proton_path = compat_dir.join(&proton_dir_name).join("proton");
                         if proton_path.exists() {
                             tracing::info!(
                                 event = "runner_found_in_steam",
