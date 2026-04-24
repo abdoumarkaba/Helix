@@ -548,8 +548,8 @@ mod tests {
         assert!(!guards.is_active()); // Class B has no session guards
 
         let calls = runner.calls();
-        // Now uses pkexec for privilege escalation
-        assert!(calls.iter().any(|c| c.0 == "pkexec" && c.1[0] == "play-helper" && c.1[1] == "sysctl-write"));
+        // Now uses pkexec with batched commands
+        assert!(calls.iter().any(|c| c.0 == "pkexec" && c.1[0] == "play-helper" && c.1[1] == "batch"));
     }
 
     #[test]
