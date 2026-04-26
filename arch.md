@@ -136,6 +136,9 @@ Polkit policy: `/usr/share/polkit-1/actions/com.github.abdoumarkt.play.policy`
 - Kernel parameter existence checks (sched_autogroup)
 - Helpful error messages for permission issues
 - **Game launch and execution**, RimWorld for test (verified working: 90fps @ 30% GPU usage)
+- **Checkpoint system** for crash recovery and session resumption
+- **Fast-launch mode** - skip detection/planning/confirmation when validated checkpoint exists
+- **Multi-distro CI testing** (Ubuntu 24.04, Fedora 41, Arch Linux, Linux Mint 22)
 
 ### ✅ Recent Fixes
 
@@ -180,6 +183,50 @@ Changed from limits.d file writing to direct `setrlimit()` call before spawning 
 **Status:**
 Fixed. Ulimit now applies to the game process immediately.
 
+---
+
+**4. System tweak persistence (BatchedTweakCommand mismatch)**
+
+**Root Cause:**
+`play-core` included `UlimitNofile` in `BatchedTweakCommand` enum, but `play-helper` was missing this variant, causing deserialization failures when batching system tweaks.
+
+**Fix Applied:**
+- Added `UlimitNofile(u64)` variant to `play-helper`'s `BatchedTweakCommand` enum
+- Added handler in `play-helper`'s `batch_execute()` to write to `/etc/security/limits.d/play.conf`
+- Modified `play-core`'s `apply_tweaks()` to include `UlimitNofile` in the batch instead of separate call
+- Made batch failures return errors instead of silently succeeding
+
+**Status:**
+Fixed. Ulimit tweaks are now properly batched with other Class B tweaks via play-helper.
+
+---
+
+**5. Checkpoint fast-launch path not found**
+
+**Root Cause:**
+Orchestrator created a temporary state directory (`pending-*`) before detection, then renamed to SHA256 hash after detection. The CLI's `create_orchestrator()` always used the temp path, so `recover()` couldn't find existing checkpoints.
+
+**Fix Applied:**
+- Modified `create_orchestrator()` to search for existing checkpoint by exe_path before creating orchestrator
+- If checkpoint found, use that state root directly via `Orchestrator::with_roots()`
+- Added `Planned` to `can_resume()` phases (previously only `Confirmed` and `Executed`)
+
+**Status:**
+Fixed. Fast-launch now correctly finds and uses existing validated checkpoints.
+
+---
+
+**6. SchedAutogroup warning when disabled**
+
+**Root Cause:**
+Code checked if `/proc/sys/kernel/sched_autogroup` exists even when disabling the tweak, causing a warning when the parameter doesn't exist but we're not trying to use it.
+
+**Fix Applied:**
+Only check kernel parameter existence when `enabled: true`. When disabling, the parameter doesn't need to exist.
+
+**Status:**
+Fixed. No spurious warnings when disabling sched_autogroup.
+
 ### 🚧 Known Issues / Blockers
 
 **1. Long startup time (~10 minutes)**
@@ -210,6 +257,88 @@ Fixed. Ulimit now applies to the game process immediately.
 
 **Status:**
 Known limitation of Proton/Wine on first launch. Not a blocker for core functionality, but UX issue.
+
+---
+
+**2. Occasional frame drops**
+
+**Symptoms:**
+- Huge frame drops occur occasionally during gameplay
+- Not consistent timing or pattern
+
+**Root Cause:**
+Unknown - needs investigation.
+
+**Status:**
+Open issue. Requires profiling and log analysis.
+
+---
+
+**3. No clean quit action**
+
+**Symptoms:**
+- After game launch, user must use desktop window manager's X button to quit
+- No CLI command to cleanly stop the game
+- Feels amateurish
+
+**Root Cause:**
+No quit/stop command implemented in CLI.
+
+**Status:**
+Open issue. Need to implement a clean game termination mechanism.
+
+---
+
+**4. Directory naming for debugging**
+
+**Symptoms:**
+- Cache directories at `~/.local/share/play/cache/` use pure hashes
+- Checkpoint directories use pure hashes
+- Difficult to identify which game a directory belongs to
+
+**Root Cause:**
+Using SHA256 hashes exclusively for directory names.
+
+**Potential Fix:**
+Use format like `{game_name}-{hash}` or `{game_name}-{timestamp}-{hash}` for easier identification.
+
+**Status:**
+Open issue. Design decision needed.
+
+---
+
+**5. System tweak persistence UX**
+
+**Symptoms:**
+- User must type password on every launch for pkexec
+- Frustrating for frequent launches
+- Some tweaks are "safe" and could be persistent
+
+**Root Cause:**
+All Class B/C tweaks require pkexec authentication every time.
+
+**Potential Fix:**
+- Categorize tweaks by safety level
+- Keep "safe" tweaks persistent (e.g., ulimit, vm.max_map_count)
+- Only prompt for "unsafe" tweaks (e.g., governor changes)
+- Or implement a "trust this system" mode
+
+**Status:**
+Open issue. UX design decision needed.
+
+---
+
+**6. Steam integration**
+
+**Symptoms:**
+- Most users launch games through Steam
+- No seamless way to use play's config with Steam
+
+**Potential Fix:**
+Support Steam launch options like `play %command%` to wrap Steam's game launching.
+
+**Status:**
+Open issue. Feature request.
 
 ## Key Data Structures
 
