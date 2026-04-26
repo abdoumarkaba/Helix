@@ -87,7 +87,7 @@ impl OrchestratorPhase {
 
     /// Returns true if session can be resumed from this phase.
     pub fn can_resume(&self) -> bool {
-        matches!(self, Self::Confirmed | Self::Executed)
+        matches!(self, Self::Planned | Self::Confirmed | Self::Executed)
     }
 }
 

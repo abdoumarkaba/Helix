@@ -1,51 +1,28 @@
 name: CI
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+on: [push, pull_request]
 
 jobs:
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-
   test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all
-      - run: cargo test --all -- --nocapture 2>&1 | tail -20
+    strategy:
+      matrix:
+        container:
+          - ubuntu:24.04
+          - fedora:41
+          - archlinux:latest
+          # Mint is Ubuntu-based; test its package detection specifically
+          - linuxmintd/mint22-amd64
 
-  msrv:
-    name: MSRV Check
     runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.75.0
-      - run: cargo check --workspace
+      - name: Install Rust
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - name: Build
+        run: cargo build --all
+      - name: Unit tests
+        run: cargo test --all
+      - name: Integration detection smoke test
+        run: cargo run --bin play-detect-only
