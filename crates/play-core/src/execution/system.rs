@@ -119,13 +119,11 @@ impl SystemModule {
                         ));
                     },
                     SystemTweak::SchedAutogroup { enabled } => {
-                        // Only need the parameter if we're enabling it
-                        if *enabled {
-                            let sysctl_path = "/proc/sys/kernel/sched_autogroup";
-                            if !self.sysctl_exists(sysctl_path) {
-                                tracing::warn!("Kernel parameter {} does not exist on this system - skipping tweak", sysctl_path);
-                                continue;
-                            }
+                        // Check if kernel parameter exists before trying to write to it
+                        let sysctl_path = "/proc/sys/kernel/sched_autogroup";
+                        if !self.sysctl_exists(sysctl_path) {
+                            tracing::warn!("Kernel parameter {} does not exist on this system - skipping tweak", sysctl_path);
+                            continue;
                         }
                         let val = if *enabled { "1" } else { "0" };
                         class_b_commands.push(BatchedTweakCommand::SysctlWrite(
