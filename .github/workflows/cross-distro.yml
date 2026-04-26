@@ -18,13 +18,13 @@ jobs:
         include:
           - distro: Ubuntu 22.04
             image: ubuntu:22.04
-            install: apt-get update && apt-get install -y build-essential pkg-config libssl-dev
+            install: apt-get update && apt-get install -y curl build-essential pkg-config libssl-dev
           - distro: Fedora 39
             image: fedora:39
-            install: dnf install -y gcc pkg-config openssl-devel
+            install: dnf install -y curl gcc pkg-config openssl-devel
           - distro: Arch Linux
             image: archlinux:latest
-            install: pacman -Syu --noconfirm --needed base-devel pkg-config openssl
+            install: pacman -Syu --noconfirm --needed curl base-devel pkg-config openssl
 
     steps:
       - name: Install build dependencies
