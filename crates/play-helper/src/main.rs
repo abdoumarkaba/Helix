@@ -10,6 +10,8 @@ enum BatchedTweakCommand {
     SysctlWrite(String, String),
     #[serde(rename = "sysfs_write")]
     SysfsWrite(String, String),
+    #[serde(rename = "ulimit_nofile")]
+    UlimitNofile(u64),
 }
 
 /// Whitelist of allowed sysfs paths for security.
@@ -172,6 +174,10 @@ fn batch_execute(json: &str) -> ExitCode {
         let result = match cmd {
             BatchedTweakCommand::SysctlWrite(key, value) => sysctl_write(&key, &value),
             BatchedTweakCommand::SysfsWrite(path, value) => sysfs_write(&path, &value),
+            BatchedTweakCommand::UlimitNofile(value) => {
+                let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
+                write_file("/etc/security/limits.d/play.conf", &content)
+            }
         };
         if result != ExitCode::SUCCESS {
             failed = true;

@@ -139,11 +139,7 @@ impl SystemModule {
                         ));
                     },
                     SystemTweak::UlimitNofile { value } => {
-                        // Ulimit is handled separately via write_limits_d
-                        // Not batched with sysctl/sysfs since it uses different file path
-                        if let Err(e) = self.write_limits_d(*value) {
-                            tracing::warn!("Ulimit write failed: {}", e);
-                        }
+                        class_b_commands.push(BatchedTweakCommand::UlimitNofile(*value));
                     },
                 }
             }
@@ -169,11 +165,10 @@ impl SystemModule {
                 tracing::info!("Batched {} system tweaks applied successfully", commands.len());
                 Ok(())
             },
-            Err(e) => {
-                tracing::warn!("Batched system tweaks failed (requires elevated helper): {}", e);
-                tracing::warn!("Game may still work but with suboptimal performance");
-                Ok(())
-            }
+            Err(e) => Err(PlayError::SysctlWrite {
+                key: "batch".to_string(),
+                reason: format!("Batched system tweaks failed: {e}. Check play-helper installation."),
+            }),
         }
     }
 

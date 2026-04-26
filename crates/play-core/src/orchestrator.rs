@@ -323,6 +323,68 @@ impl Orchestrator {
         self.env.as_ref()
     }
 
+    /// Check if fast launch is available from a validated checkpoint.
+    ///
+    /// Returns true if:
+    /// - Phase is Validated (previous run completed successfully)
+    /// - A plan exists with launch action
+    /// - State directory is correctly named (not temp)
+    pub fn can_fast_launch(&self) -> bool {
+        self.phase == OrchestratorPhase::Validated && self.plan.is_some()
+    }
+
+    /// Fast launch from a validated checkpoint.
+    ///
+    /// Skips detection, planning, and confirmation phases. Directly launches
+    /// the game using the saved configuration from the checkpoint.
+    ///
+    /// Returns the spawned child process PID.
+    ///
+    /// # Errors
+    ///
+    /// Returns `PlayError::OrchestratorFailed` if checkpoint is not Validated.
+    /// Returns `PlayError::RunnerNotFound` if runner is missing.
+    pub fn fast_launch(&mut self) -> Result<u32, PlayError> {
+        if !self.can_fast_launch() {
+            return Err(PlayError::OrchestratorFailed {
+                phase: "fast_launch".to_string(),
+                reason: "Checkpoint not validated or no plan available".to_string(),
+            });
+        }
+
+        let plan = self.plan.as_ref().expect("plan checked above");
+        let env = self.env.as_ref().expect("env exists when plan exists");
+
+        info!(
+            event = "fast_launch_start",
+            checkpoint = %self.checkpoint_path().display(),
+            "Launching from validated checkpoint"
+        );
+
+        // Apply session-scoped (Class A) tweaks only - persistent tweaks already applied
+        let system_module = crate::execution::system::SystemModule::new(
+            self.sys_root.clone(),
+            self.cmd_runner.clone_boxed(),
+        );
+
+        let guards = system_module.apply_tweaks(&plan.tweaks, &env.hardware)?;
+        self.guards = Some(guards);
+
+        // Launch the game directly
+        let launch_module = crate::execution::launch::LaunchModule::new();
+        let child = launch_module.execute(&plan.launch_action)?;
+        let pid = child.id();
+        self.running_game = Some(child);
+
+        info!(
+            event = "fast_launch_complete",
+            pid = pid,
+            "Game launched from checkpoint"
+        );
+
+        Ok(pid)
+    }
+
     /// Recover from a previous run's checkpoint (if exists).
     ///
     /// Returns `Ok(true)` if recovery succeeded, `Ok(false)` if no checkpoint exists.

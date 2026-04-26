@@ -535,14 +535,22 @@ fn undo_game(exe_path: &Path) -> Result<(), PlayError> {
 
     let matching_checkpoint = find_checkpoint_by_exe_path(&games_root, exe_path)?;
 
-    let Some((_state_root, _checkpoint)) = matching_checkpoint else {
+    let Some((state_root, _checkpoint)) = matching_checkpoint else {
         return Err(PlayError::ValidationFailed {
             reason: format!("No previous session found for {}", exe_path.display()),
         });
     };
 
     let cmd_runner = Box::new(RealCommandRunner);
-    let mut orchestrator = create_orchestrator(cmd_runner);
+    let mut orchestrator = Orchestrator::with_roots(
+        PathBuf::from("/proc"),
+        PathBuf::from("/sys"),
+        PathBuf::from("/etc"),
+        state_root,
+        get_runners_root(),
+        get_prefix_root(),
+        cmd_runner,
+    );
 
     // Try to recover from checkpoint
     match orchestrator.recover() {
@@ -607,11 +615,26 @@ fn get_prefix_root() -> PathBuf {
 
 fn create_orchestrator(
     cmd_runner: Box<dyn play_core::modules::detection::CommandRunner>,
+    exe_path: &Path,
 ) -> Orchestrator {
-    // Pass the games root directly - orchestrator will create temp dir then rename to SHA256
     let games_root =
         data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games");
 
+    // Check if there's an existing checkpoint for this exe
+    if let Ok(Some((state_root, _checkpoint))) = find_checkpoint_by_exe_path(&games_root, exe_path) {
+        // Use existing state directory for recovery
+        return Orchestrator::with_roots(
+            PathBuf::from("/proc"),
+            PathBuf::from("/sys"),
+            PathBuf::from("/etc"),
+            state_root,
+            get_runners_root(),
+            get_prefix_root(),
+            cmd_runner,
+        );
+    }
+
+    // No existing checkpoint - use temp directory (will be renamed after detection)
     Orchestrator::new(games_root, get_runners_root(), get_prefix_root(), cmd_runner)
 }
 
@@ -737,9 +760,9 @@ fn main() {
         style("Analyzing game...").dim()
     ));
 
-    // Create orchestrator
+    // Create orchestrator (will use existing checkpoint path if found)
     let cmd_runner = Box::new(RealCommandRunner);
-    let mut orchestrator = create_orchestrator(cmd_runner);
+    let mut orchestrator = create_orchestrator(cmd_runner, &exe_path);
 
     // Check for checkpoint recovery (unless --force-fresh is set)
     if !args.force_fresh {
@@ -770,6 +793,43 @@ fn main() {
         }
     } else {
         info!(event = "force_fresh", "Starting fresh session (--force-fresh)");
+    }
+
+    // Check for fast launch from validated checkpoint
+    if orchestrator.can_fast_launch() {
+        let checkpoint_path = find_checkpoint_by_exe_path(
+            &data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games"),
+            &exe_path
+        ).ok().flatten().map(|(p, _)| p).unwrap_or_else(|| PathBuf::from("unknown"));
+
+        println!(
+            "  {} Checkpoint found at {}, launching from saved configuration...",
+            style("Fast launch:").cyan(),
+            style(checkpoint_path.display()).dim()
+        );
+
+        match orchestrator.fast_launch() {
+            Ok(pid) => {
+                println!(
+                    "\n  {} Game launched successfully (PID: {})",
+                    style("Game launched successfully").green().bold(),
+                    pid
+                );
+                println!(
+                    "  {}",
+                    style("Press Ctrl+C to stop monitoring (game continues in background)").dim()
+                );
+                std::process::exit(0);
+            },
+            Err(e) => {
+                eprintln!(
+                    "\n  {} Fast launch failed: {}",
+                    style("Warning:").yellow(),
+                    e
+                );
+                eprintln!("  Falling back to full setup...\n");
+            }
+        }
     }
 
     // Run orchestrator lifecycle with progress indicator
