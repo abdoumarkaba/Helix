@@ -39,14 +39,14 @@ No config files. No setup wizard. No flags required.
 ### Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/abdoumarkt/Just-Play/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/abdoumarkaba/Just-Play/main/install.sh | bash
 ```
 
 Or install manually:
 
 ```bash
 # Download latest release
-curl -sSL https://github.com/abdoumarkt/Just-Play/releases/latest/download/helix-x86_64.tar.gz | tar xz
+curl -sSL https://github.com/abdoumarkaba/Just-Play/releases/latest/download/helix-x86_64.tar.gz | tar xz
 
 # Install binary
 sudo mv helix /usr/local/bin/
@@ -237,13 +237,13 @@ Requires explicit user consent per invocation. Never applied on laptops.
 ### One-Liner
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/abdoumarkt/Just-Play/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/abdoumarkaba/Just-Play/main/install.sh | bash
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/abdoumarkt/Just-Play.git
+git clone https://github.com/abdoumarkaba/Just-Play.git
 cd Just-Play
 cargo build --release
 
@@ -390,7 +390,7 @@ Helix never uses `sh -c` or `shell: true`. All commands are executed with explic
 | Vendor | Driver | Status |
 |--------|--------|--------|
 | NVIDIA | Proprietary | ✅ Full support |
-| AMD | RADV (Mesa) | ✅ Full support |
+| AMD | RADV (Mesa) | 🚧 Coming soon |
 | Intel | ANV (Mesa) | ✅ Full support |
 
 ---
@@ -510,6 +510,8 @@ Tweaks are defined as pure data in `TweakRegistry`. See `tweak.md` for the full 
 
 Contributions are welcome! Please read:
 
+> **Note**: The codebase is currently transitioning from "play" to "helix" naming. You may see references to `play` in paths (e.g., `~/.local/share/play/`, `play-core`, `play-helper`) until the migration is complete. The binary will be renamed to `helix` in the next release.
+
 - `DESIGN.md` for architecture philosophy
 - `.clinerules` for code standards
 - `module.md` for adding new modules
@@ -528,7 +530,7 @@ Helix is licensed under the **GNU General Public License v3.0**.
 
 ```
 Helix - Zero-config Windows gaming on Linux
-Copyright (C) 2024 abdoumarkt
+Copyright (C) 2024 abdoumarkaba
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
