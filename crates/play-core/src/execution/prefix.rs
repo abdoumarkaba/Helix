@@ -422,11 +422,8 @@ mod tests {
             env_vars: &[(&str, &str)],
         ) -> Result<String, PlayError> {
             // Build a command string that includes env vars for matching
-            let env_str = env_vars
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join(" ");
+            let env_str =
+                env_vars.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ");
             let full_cmd = format!("{env_str} {cmd} {}", args.join(" "));
             self.calls.lock().unwrap().push(full_cmd.clone());
 

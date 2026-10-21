@@ -62,9 +62,19 @@ impl PackageManager for AptPm {
 
         // Also check for common binary if package check fails
         match package {
-            "wine64" => Command::new("wine").arg("--version").output().map(|o| o.status.success()).unwrap_or(false),
-            "gamemode" => Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
-                || Command::new("gamemode").arg("--version").output().map(|o| o.status.success()).unwrap_or(false),
+            "wine64" => Command::new("wine")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "gamemode" => {
+                Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
+                    || Command::new("gamemode")
+                        .arg("--version")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+            },
             _ => false,
         }
     }
@@ -125,24 +135,33 @@ impl PackageManager for DnfPm {
         // Also check for common binary if package check fails
         // (some packages like wine might be meta-packages)
         match package {
-            "wine" => Command::new("wine").arg("--version").output().map(|o| o.status.success()).unwrap_or(false),
-            "gamemode" => Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
-                || Command::new("gamemode").arg("--version").output().map(|o| o.status.success()).unwrap_or(false),
+            "wine" => Command::new("wine")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "gamemode" => {
+                Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
+                    || Command::new("gamemode")
+                        .arg("--version")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+            },
             _ => false,
         }
     }
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
         // Try with sudo first (for interactive terminals)
-        let output = Command::new("sudo")
-            .args(["dnf", "install", "-y"])
-            .args(packages)
-            .output()
-            .map_err(|e| PlayError::PackageInstall {
-                pm: "dnf".into(),
-                package: packages.join(", "),
-                stderr: e.to_string(),
-            })?;
+        let output =
+            Command::new("sudo").args(["dnf", "install", "-y"]).args(packages).output().map_err(
+                |e| PlayError::PackageInstall {
+                    pm: "dnf".into(),
+                    package: packages.join(", "),
+                    stderr: e.to_string(),
+                },
+            )?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -187,9 +206,19 @@ impl PackageManager for PacmanPm {
 
         // Also check for common binary if package check fails
         match package {
-            "wine" => Command::new("wine").arg("--version").output().map(|o| o.status.success()).unwrap_or(false),
-            "gamemode" => Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
-                || Command::new("gamemode").arg("--version").output().map(|o| o.status.success()).unwrap_or(false),
+            "wine" => Command::new("wine")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "gamemode" => {
+                Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
+                    || Command::new("gamemode")
+                        .arg("--version")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+            },
             _ => false,
         }
     }
@@ -249,9 +278,19 @@ impl PackageManager for ZypperPm {
 
         // Also check for common binary if package check fails
         match package {
-            "wine" => Command::new("wine").arg("--version").output().map(|o| o.status.success()).unwrap_or(false),
-            "gamemode" => Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
-                || Command::new("gamemode").arg("--version").output().map(|o| o.status.success()).unwrap_or(false),
+            "wine" => Command::new("wine")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "gamemode" => {
+                Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
+                    || Command::new("gamemode")
+                        .arg("--version")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+            },
             _ => false,
         }
     }

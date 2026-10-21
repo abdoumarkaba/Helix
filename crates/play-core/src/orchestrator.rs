@@ -376,11 +376,7 @@ impl Orchestrator {
         let pid = child.id();
         self.running_game = Some(child);
 
-        info!(
-            event = "fast_launch_complete",
-            pid = pid,
-            "Game launched from checkpoint"
-        );
+        info!(event = "fast_launch_complete", pid = pid, "Game launched from checkpoint");
 
         Ok(pid)
     }
@@ -429,7 +425,11 @@ impl Orchestrator {
             // After detection, rename state directory to use real SHA256
             self.rename_state_to_hash()?;
         } else {
-            info!(event = "phase_skip", phase = "detection", "Skipping detection: already complete from checkpoint");
+            info!(
+                event = "phase_skip",
+                phase = "detection",
+                "Skipping detection: already complete from checkpoint"
+            );
         }
 
         // Phase 2: Planning (skip if already planned from checkpoint)
@@ -453,7 +453,11 @@ impl Orchestrator {
                 }
             }
         } else {
-            info!(event = "phase_skip", phase = "planning", "Skipping planning: already complete from checkpoint");
+            info!(
+                event = "phase_skip",
+                phase = "planning",
+                "Skipping planning: already complete from checkpoint"
+            );
         }
 
         // Phase 3: Confirmation
@@ -836,7 +840,7 @@ impl Orchestrator {
         match fs::rename(&self.state_root, &new_state_root) {
             Ok(()) => {
                 self.state_root = new_state_root;
-            }
+            },
             Err(e) => {
                 return Err(PlayError::CheckpointFailed {
                     path: self.state_root.clone(),
@@ -845,7 +849,7 @@ impl Orchestrator {
                         new_state_root.display()
                     ),
                 });
-            }
+            },
         }
 
         info!(
@@ -1148,12 +1152,7 @@ impl Orchestrator {
         println!("{}", style("  System Changes:").cyan());
         for tweak in &plan.tweaks {
             if let crate::models::plan::TweakDecision::Apply(ref sys_tweak) = tweak.decision {
-                println!(
-                    "    {} {:?}: {:?}",
-                    style("·").cyan(),
-                    tweak.id,
-                    sys_tweak
-                );
+                println!("    {} {:?}: {:?}", style("·").cyan(), tweak.id, sys_tweak);
             }
         }
         println!();
@@ -1207,7 +1206,8 @@ impl Orchestrator {
             return Ok(());
         }
 
-        let install_msg = format!("Installing {} packages (sudo password may be required)...", to_install.len());
+        let install_msg =
+            format!("Installing {} packages (sudo password may be required)...", to_install.len());
         self.report_progress(&install_msg);
         info!(
             event = "packages_installing",
@@ -1235,9 +1235,7 @@ impl Orchestrator {
     fn verify_vulkan(&self) -> Result<(), PlayError> {
         use std::process::Command;
 
-        let output = Command::new("vulkaninfo")
-            .arg("--summary")
-            .output();
+        let output = Command::new("vulkaninfo").arg("--summary").output();
 
         match output {
             Ok(out) if out.status.success() => {
@@ -1292,10 +1290,7 @@ impl Drop for Orchestrator {
 /// Generate a temporary state directory name for use before detection completes.
 fn temp_state_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     format!("pending-{now:024x}")
 }
 

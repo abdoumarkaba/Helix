@@ -111,19 +111,13 @@ impl LaunchModule {
         }
 
         // Configure stdio
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         // BUG-4: Apply ulimit before spawn (not via limits.d which only affects new PAM sessions)
         if let Some(nofile) = ulimit_nofile {
             // Set both soft and hard limit for max open files
             if let Err(e) = setrlimit(Resource::RLIMIT_NOFILE, nofile, nofile) {
-                tracing::warn!(
-                    "Failed to set RLIMIT_NOFILE to {} (non-fatal): {}",
-                    nofile,
-                    e
-                );
+                tracing::warn!("Failed to set RLIMIT_NOFILE to {} (non-fatal): {}", nofile, e);
             } else {
                 tracing::info!("Set RLIMIT_NOFILE to {}", nofile);
             }
@@ -140,17 +134,18 @@ impl LaunchModule {
                      4. Try: chmod +x {}\n\
                      Original error: {e}",
                     exe_path.display(),
-                    exe_path.ancestors().nth(1).map(|p| p.display().to_string()).unwrap_or_else(|| "unknown".to_string()),
+                    exe_path
+                        .ancestors()
+                        .nth(1)
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
                     exe_path.display(),
                     exe_path.display()
                 )
             } else {
                 format!("failed to spawn process: {e}")
             };
-            PlayError::GameLaunchFailed {
-                exe_path: exe_path.clone(),
-                reason,
-            }
+            PlayError::GameLaunchFailed { exe_path: exe_path.clone(), reason }
         })?;
 
         let pid = child.id();
@@ -203,7 +198,11 @@ impl LaunchModule {
                     // Process still running - verify it actually exists in /proc
                     if proc_exists {
                         stable_count += 1;
-                        tracing::debug!(pid, stable_count, "Process still running and verified in /proc");
+                        tracing::debug!(
+                            pid,
+                            stable_count,
+                            "Process still running and verified in /proc"
+                        );
 
                         // Early-exit: if we have enough consecutive stable checks, process is verified
                         if stable_count >= EARLY_EXIT_THRESHOLD {
@@ -275,7 +274,11 @@ impl LaunchModule {
                                 let ppid_str = line.split(':').nth(1).unwrap_or("0").trim();
                                 if let Ok(ppid) = ppid_str.parse::<u32>() {
                                     if ppid == parent_pid {
-                                        tracing::debug!(child_pid = pid_str, parent_pid, "Found child process");
+                                        tracing::debug!(
+                                            child_pid = pid_str,
+                                            parent_pid,
+                                            "Found child process"
+                                        );
                                         return true;
                                     }
                                 }

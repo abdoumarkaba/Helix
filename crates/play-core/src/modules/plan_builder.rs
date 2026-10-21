@@ -70,7 +70,8 @@ impl<'a> PlanBuilder<'a> {
             .join("play/cache")
             .join(&self.env.identity.exe_hash);
         let cache_path = cache_dir.join("dxvk-cache");
-        let (async_compile, dec) = DecisionEngine::configure_dxvk_async(&self.env.identity.anti_cheat, Some(&cache_path));
+        let (async_compile, dec) =
+            DecisionEngine::configure_dxvk_async(&self.env.identity.anti_cheat, Some(&cache_path));
         info!("DXVK async: {} (cache path: {})", async_compile, cache_path.display());
         decisions.push(dec);
 
@@ -96,10 +97,9 @@ impl<'a> PlanBuilder<'a> {
         // Extract runner path from runner_action for use in launch_action
         let runner_install_path = match &runner_action {
             RunnerAction::AlreadyInstalled { path } => path.clone(),
-            RunnerAction::Download { version, .. } => self
-                .runners_install_root
-                .join(format!("{runner_type:?}"))
-                .join(version.to_string()),
+            RunnerAction::Download { version, .. } => {
+                self.runners_install_root.join(format!("{runner_type:?}")).join(version.to_string())
+            },
         };
 
         // --- 7. Sync mode ---
@@ -119,7 +119,8 @@ impl<'a> PlanBuilder<'a> {
         let (prefix_arch, dec) = DecisionEngine::select_prefix_arch(self.env.identity.pe_arch);
         decisions.push(dec);
 
-        let (windows_version, dec) = DecisionEngine::select_windows_version(self.env.identity.dx_version);
+        let (windows_version, dec) =
+            DecisionEngine::select_windows_version(self.env.identity.dx_version);
         info!("Prefix: {:?}, Windows: {:?}", prefix_arch, windows_version);
         decisions.push(dec);
 
@@ -135,7 +136,8 @@ impl<'a> PlanBuilder<'a> {
         // --- 10. Tweaks ---
         info!("Resolving tweaks...");
         let tweaks = self.resolve_tweaks(&mut warnings, fsync, esync, async_compile);
-        let applied_count = tweaks.iter().filter(|t| matches!(t.decision, TweakDecision::Apply(_))).count();
+        let applied_count =
+            tweaks.iter().filter(|t| matches!(t.decision, TweakDecision::Apply(_))).count();
         info!("Applied {} tweaks", applied_count);
 
         // --- 11. Required packages ---
@@ -198,9 +200,8 @@ impl<'a> PlanBuilder<'a> {
             info!("MangoHud auto-enabled (installed and detected)");
 
             // Configure MangoHud logging for detailed metrics capture
-            let log_dir = dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join("play/logs");
+            let log_dir =
+                dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("play/logs");
             let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
             let log_path = log_dir.join(format!("mangohud_{}.csv", timestamp));
 
@@ -209,7 +210,9 @@ impl<'a> PlanBuilder<'a> {
                 warn!("Failed to create MangoHud log directory {}: {}", log_dir.display(), e);
             } else {
                 // Configure MangoHud to log to file
-                env.launch.env.insert("MANGOHUD_CONFIGFILE".to_owned(), log_path.display().to_string());
+                env.launch
+                    .env
+                    .insert("MANGOHUD_CONFIGFILE".to_owned(), log_path.display().to_string());
                 env.launch.env.insert("MANGOHUD_LOG".to_owned(), "1".to_string());
 
                 // Enable all metrics for detailed logging
@@ -228,11 +231,17 @@ impl<'a> PlanBuilder<'a> {
         }
 
         // Log completion stats before moving decisions
-        info!("Plan complete: {} decisions, {} tweaks, {} warnings", decisions.len(), tweaks.len(), warnings.len());
+        info!(
+            "Plan complete: {} decisions, {} tweaks, {} warnings",
+            decisions.len(),
+            tweaks.len(),
+            warnings.len()
+        );
 
         // Record all decisions in metadata
         env.metadata.decisions = decisions;
-        env.metadata.resolution_source = crate::models::environment::ResolutionSource::FullyAutomatic;
+        env.metadata.resolution_source =
+            crate::models::environment::ResolutionSource::FullyAutomatic;
 
         // --- 13. Build launch action ---
         let exe_path = env.identity.exe_path.clone();
@@ -248,10 +257,15 @@ impl<'a> PlanBuilder<'a> {
             crate::models::environment::RunnerType::ProtonGE
             | crate::models::environment::RunnerType::ProtonOfficial => {
                 // Proton uses STEAM_COMPAT_DATA_PATH for the prefix
-                env.launch.env.insert("STEAM_COMPAT_DATA_PATH".to_owned(), prefix_path.to_string_lossy().to_string());
+                env.launch.env.insert(
+                    "STEAM_COMPAT_DATA_PATH".to_owned(),
+                    prefix_path.to_string_lossy().to_string(),
+                );
                 // WINEPREFIX should be STEAM_COMPAT_DATA_PATH/pfx for GE-Proton compatibility
                 let pfx_path = prefix_path.join("pfx");
-                env.launch.env.insert("WINEPREFIX".to_owned(), pfx_path.to_string_lossy().to_string());
+                env.launch
+                    .env
+                    .insert("WINEPREFIX".to_owned(), pfx_path.to_string_lossy().to_string());
 
                 // STEAM_COMPAT_CLIENT_INSTALL_PATH: detect Steam or use stub
                 let steam_install = detect_steam_installation();
@@ -263,7 +277,11 @@ impl<'a> PlanBuilder<'a> {
                         .unwrap_or_else(|| PathBuf::from("/tmp"))
                         .join("play/steam-stub");
                     if let Err(e) = std::fs::create_dir_all(&stub_path) {
-                        warn!("Failed to create Steam stub directory {}: {}", stub_path.display(), e);
+                        warn!(
+                            "Failed to create Steam stub directory {}: {}",
+                            stub_path.display(),
+                            e
+                        );
                     }
                     stub_path.to_string_lossy().to_string()
                 };
@@ -277,19 +295,28 @@ impl<'a> PlanBuilder<'a> {
                 if let Err(e) = std::fs::create_dir_all(&cache_dir) {
                     warn!("Failed to create DXVK cache directory {}: {}", cache_dir.display(), e);
                 }
-                env.launch.env.insert("DXVK_STATE_CACHE_PATH".to_owned(), cache_dir.to_string_lossy().to_string());
+                env.launch.env.insert(
+                    "DXVK_STATE_CACHE_PATH".to_owned(),
+                    cache_dir.to_string_lossy().to_string(),
+                );
 
                 // Enable Proton logging for debugging (BUG-6)
                 env.launch.env.insert("PROTON_LOG".to_owned(), "1".to_owned());
                 // Reduce Wine debug output noise (BUG-6)
                 env.launch.env.insert("WINEDEBUG".to_owned(), "-all".to_owned());
-                info!("Proton environment configured: STEAM_COMPAT_DATA_PATH={}, WINEPREFIX={}", prefix_path.display(), pfx_path.display());
+                info!(
+                    "Proton environment configured: STEAM_COMPAT_DATA_PATH={}, WINEPREFIX={}",
+                    prefix_path.display(),
+                    pfx_path.display()
+                );
             },
             crate::models::environment::RunnerType::WineGE
             | crate::models::environment::RunnerType::WineStaging
             | crate::models::environment::RunnerType::SodaWine => {
                 // Wine uses WINEPREFIX for the prefix
-                env.launch.env.insert("WINEPREFIX".to_owned(), prefix_path.to_string_lossy().to_string());
+                env.launch
+                    .env
+                    .insert("WINEPREFIX".to_owned(), prefix_path.to_string_lossy().to_string());
                 // Enable Wine logging for debugging
                 env.launch.env.insert("WINEDEBUG".to_owned(), "-all".to_owned());
             },
@@ -397,8 +424,10 @@ impl<'a> PlanBuilder<'a> {
             if self.env.hardware.gpu.driver_version < min_driver {
                 let distro = &self.env.hardware.distro.distro;
                 let install_cmd = match distro {
-                    crate::models::environment::Distro::Ubuntu |
-                    crate::models::environment::Distro::Debian => "sudo apt install nvidia-driver-535",
+                    crate::models::environment::Distro::Ubuntu
+                    | crate::models::environment::Distro::Debian => {
+                        "sudo apt install nvidia-driver-535"
+                    },
                     crate::models::environment::Distro::Fedora => "sudo dnf install akmod-nvidia",
                     crate::models::environment::Distro::Arch => "sudo pacman -S nvidia",
                     _ => "Update your NVIDIA driver",

@@ -28,7 +28,12 @@ impl PlanningModule {
     /// Plan execution for the given game environment.
     pub fn plan(&self, env: &GameEnvironment) -> Result<GamePlan, PlayError> {
         let manifest = runner_manifest::get_default_manifest();
-        PlanBuilder::new(env, &manifest, self.prefix_root.clone(), self.runners_install_root.clone())
-            .build()
+        PlanBuilder::new(
+            env,
+            &manifest,
+            self.prefix_root.clone(),
+            self.runners_install_root.clone(),
+        )
+        .build()
     }
 }

@@ -216,9 +216,7 @@ impl RunnerModule {
         let response = ureq::get(url).call().map_err(|e| format!("HTTP request failed: {e}"))?;
 
         // Try to get content length for progress bar
-        let total_bytes = response
-            .header("content-length")
-            .and_then(|h| h.parse::<u64>().ok());
+        let total_bytes = response.header("content-length").and_then(|h| h.parse::<u64>().ok());
 
         let pb = if let Some(total) = total_bytes {
             let pb = ProgressBar::new(total);
@@ -229,9 +227,11 @@ impl RunnerModule {
             pb
         } else {
             let pb = ProgressBar::new_spinner();
-            pb.set_style(indicatif::ProgressStyle::default_spinner()
-                .template("{spinner:.green} {bytes} downloaded")
-                .unwrap_or_else(|_| indicatif::ProgressStyle::default_spinner()));
+            pb.set_style(
+                indicatif::ProgressStyle::default_spinner()
+                    .template("{spinner:.green} {bytes} downloaded")
+                    .unwrap_or_else(|_| indicatif::ProgressStyle::default_spinner()),
+            );
             pb
         };
 

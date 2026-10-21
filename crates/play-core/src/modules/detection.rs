@@ -106,7 +106,7 @@ pub fn read_kernel_version(proc_root: &Path) -> Result<KernelVersion, PlayError>
             return Ok(version);
         }
     }
-    
+
     Err(PlayError::HardwareDetection { component: "kernel.version".into() })
 }
 
@@ -359,7 +359,7 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
         Err(e) => {
             info!("lspci failed or no GPU found: {e}");
             return None;
-        }
+        },
     };
 
     debug!("lspci -mm output: {}", output);
@@ -380,15 +380,15 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
         // Parse by extracting quoted strings
         let parts: Vec<&str> = line.split_whitespace().collect();
         debug!("Line parts count: {}", parts.len());
-        
+
         // Find the vendor name (position 2, quoted) and device name (position 3, quoted)
         if parts.len() >= 4 {
             let vendor_name = parts.get(2).unwrap_or(&"").trim_matches('"');
             let device_name = parts.get(3).unwrap_or(&"").trim_matches('"');
-            
+
             debug!("Vendor name: {}", vendor_name);
             debug!("Device name: {}", device_name);
-            
+
             // Detect vendor from vendor name string
             let gpu_vendor = if vendor_name.contains("NVIDIA") {
                 GpuVendor::NVIDIA
@@ -398,7 +398,10 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
                 GpuVendor::Intel
             } else {
                 // Fallback: try to detect from device name
-                if device_name.contains("NVIDIA") || device_name.contains("GeForce") || device_name.contains("RTX") {
+                if device_name.contains("NVIDIA")
+                    || device_name.contains("GeForce")
+                    || device_name.contains("RTX")
+                {
                     GpuVendor::NVIDIA
                 } else if device_name.contains("AMD") || device_name.contains("Radeon") {
                     GpuVendor::AMD
@@ -408,7 +411,7 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
                     GpuVendor::Unknown
                 }
             };
-            
+
             if gpu_vendor != GpuVendor::Unknown {
                 gpus.push((gpu_vendor, device_name.to_string()));
             }
@@ -422,7 +425,8 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
 
     // Prioritize discrete GPUs (NVIDIA/AMD) over integrated (Intel)
     // On laptops with hybrid graphics, we want the discrete GPU
-    let (gpu_vendor, gpu_model) = gpus.iter()
+    let (gpu_vendor, gpu_model) = gpus
+        .iter()
         .find(|(vendor, _)| *vendor == GpuVendor::NVIDIA || *vendor == GpuVendor::AMD)
         .or_else(|| gpus.first())
         .unwrap();
@@ -459,7 +463,7 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
         Err(e) => {
             info!("vulkaninfo failed: {e}");
             return None;
-        }
+        },
     };
 
     debug!("vulkaninfo --summary output: {}", output);
@@ -485,7 +489,10 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
                 debug!("Found vendorID: {}", vendor_str);
                 if vendor_str.contains("0x10de") || vendor_str.contains("NVIDIA") {
                     gpu_vendor = GpuVendor::NVIDIA;
-                } else if vendor_str.contains("0x1002") || vendor_str.contains("0x1022") || vendor_str.contains("AMD") {
+                } else if vendor_str.contains("0x1002")
+                    || vendor_str.contains("0x1022")
+                    || vendor_str.contains("AMD")
+                {
                     gpu_vendor = GpuVendor::AMD;
                 } else if vendor_str.contains("0x8086") || vendor_str.contains("Intel") {
                     gpu_vendor = GpuVendor::Intel;
@@ -527,13 +534,15 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
     info!("Attempting nvidia-smi detection...");
 
     // Query GPU name, VRAM, and driver version
-    let output = match cmd_runner
-        .run_command("nvidia-smi", &["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"]) {
+    let output = match cmd_runner.run_command(
+        "nvidia-smi",
+        &["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"],
+    ) {
         Ok(out) => out,
         Err(e) => {
             info!("nvidia-smi not available or failed: {e}");
             return None;
-        }
+        },
     };
 
     let parts: Vec<&str> = output.trim().split(',').collect();
@@ -544,11 +553,8 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
 
         // Parse VRAM (format: "4096 MiB")
         // nvidia-smi returns memory.total in MiB, so we keep the value as-is
-        let vram_mb = vram_str
-            .split_whitespace()
-            .next()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(0);
+        let vram_mb =
+            vram_str.split_whitespace().next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
 
         // Parse driver version (NVIDIA format like "580.142" doesn't match semver)
         // Extract major version for comparison
@@ -576,7 +582,7 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
                 resizable_bar: false, // Would need to check
                 dx12_feature_level: None,
             },
-            is_laptop_gpu: false, // TODO: Detect from name
+            is_laptop_gpu: false,             // TODO: Detect from name
             nvidia_vbios_max_clock_mhz: None, // Would need extra query
         });
     }
@@ -742,11 +748,11 @@ fn parse_pipewire_rate(cmd_runner: &dyn CommandRunner) -> Option<u32> {
             let snippet = if out.len() > 200 { &out[..200] } else { &out };
             info!("pw-dump output: {snippet}...");
             out
-        }
+        },
         Err(e) => {
             info!("pw-dump failed: {e}");
             return None;
-        }
+        },
     };
 
     // Look for "rate": <number> in JSON output
@@ -758,7 +764,7 @@ fn parse_pipewire_rate(cmd_runner: &dyn CommandRunner) -> Option<u32> {
                     Ok(rate) => return Some(rate),
                     Err(e) => {
                         info!("Failed to parse rate value '{rate_str}': {e}");
-                    }
+                    },
                 }
             }
         }
@@ -863,21 +869,20 @@ pub fn detect_display(
 
 /// Detect if MangoHud is installed and available.
 /// Returns Some(MangoHudConfig) if mangohud --version succeeds.
-pub fn detect_mangohud(cmd_runner: &dyn CommandRunner) -> Option<crate::models::environment::MangoHudConfig> {
+pub fn detect_mangohud(
+    cmd_runner: &dyn CommandRunner,
+) -> Option<crate::models::environment::MangoHudConfig> {
     info!("Checking for MangoHud...");
 
     match cmd_runner.run_command("mangohud", &["--version"]) {
         Ok(_) => {
             info!("MangoHud detected and available");
-            Some(crate::models::environment::MangoHudConfig {
-                enabled: true,
-                config_path: None,
-            })
+            Some(crate::models::environment::MangoHudConfig { enabled: true, config_path: None })
         },
         Err(e) => {
             info!("MangoHud not available: {e}");
             None
-        }
+        },
     }
 }
 
@@ -886,7 +891,9 @@ pub fn detect_mangohud(cmd_runner: &dyn CommandRunner) -> Option<crate::models::
 // ---------------------------------------------------------------------------
 
 /// Detect gaming-related tools (wine, winetricks, gamemode, dxvk, proton, vulkan).
-pub fn detect_gaming_tools(cmd_runner: &dyn CommandRunner) -> crate::models::environment::GamingToolsProfile {
+pub fn detect_gaming_tools(
+    cmd_runner: &dyn CommandRunner,
+) -> crate::models::environment::GamingToolsProfile {
     info!("Detecting gaming tools...");
 
     // Check wine
@@ -899,7 +906,7 @@ pub fn detect_gaming_tools(cmd_runner: &dyn CommandRunner) -> crate::models::env
         Err(e) => {
             info!("Wine not available: {e}");
             (false, None)
-        }
+        },
     };
 
     // Check winetricks
@@ -921,7 +928,8 @@ pub fn detect_gaming_tools(cmd_runner: &dyn CommandRunner) -> crate::models::env
 
     // Check dxvk (via dxvk version or directory check)
     let dxvk_installed = cmd_runner.run_command("dxvk", &["--version"]).is_ok()
-        || std::path::Path::new(&dirs::home_dir().unwrap_or_default().join(".local/share/dxvk")).exists();
+        || std::path::Path::new(&dirs::home_dir().unwrap_or_default().join(".local/share/dxvk"))
+            .exists();
     if dxvk_installed {
         info!("DXVK detected");
     } else {
@@ -929,8 +937,14 @@ pub fn detect_gaming_tools(cmd_runner: &dyn CommandRunner) -> crate::models::env
     }
 
     // Check proton (Steam compatibility tools directory)
-    let proton_available = std::path::Path::new(&dirs::home_dir().unwrap_or_default().join(".steam/steam/compatibilitytools.d")).exists()
-        || std::path::Path::new(&dirs::home_dir().unwrap_or_default().join(".local/share/Steam/compatibilitytools.d")).exists();
+    let proton_available = std::path::Path::new(
+        &dirs::home_dir().unwrap_or_default().join(".steam/steam/compatibilitytools.d"),
+    )
+    .exists()
+        || std::path::Path::new(
+            &dirs::home_dir().unwrap_or_default().join(".local/share/Steam/compatibilitytools.d"),
+        )
+        .exists();
     if proton_available {
         info!("Proton compatibility tools directory detected");
     } else {
@@ -1067,7 +1081,11 @@ pub fn detect_hardware(
         cpu.vendor as i32, gpu.vendor as i32, distro.distro as i32
     );
 
-    Ok(DetectionResult { hw: HardwareProfile { gpu, cpu, memory, kernel, display, distro, gaming_tools }, audio, mangohud })
+    Ok(DetectionResult {
+        hw: HardwareProfile { gpu, cpu, memory, kernel, display, distro, gaming_tools },
+        audio,
+        mangohud,
+    })
 }
 
 #[cfg(test)]
@@ -1175,8 +1193,13 @@ mod tests {
         let runner = MockCommandRunner {
             responses: vec![
                 ("lspci".to_string(), Err("not found".to_string())),
-                ("vulkaninfo".to_string(), Ok("deviceName: AMD Radeon RX 6800 XT\nvendorID: 0x1002".to_string())),
-            ].into_iter().collect(),
+                (
+                    "vulkaninfo".to_string(),
+                    Ok("deviceName: AMD Radeon RX 6800 XT\nvendorID: 0x1002".to_string()),
+                ),
+            ]
+            .into_iter()
+            .collect(),
         };
 
         let gpu = detect_gpu_with_fallbacks(&runner);
@@ -1190,7 +1213,9 @@ mod tests {
             responses: vec![
                 ("lspci".to_string(), Err("not found".to_string())),
                 ("vulkaninfo".to_string(), Err("not found".to_string())),
-            ].into_iter().collect(),
+            ]
+            .into_iter()
+            .collect(),
         };
 
         let gpu = detect_gpu_with_fallbacks(&runner);

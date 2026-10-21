@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::process::ExitCode;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -40,9 +40,7 @@ const SYSCTL_WHITELIST: &[&str] = &[
 ];
 
 /// Whitelist of allowed file paths for write-file command.
-const FILE_WHITELIST: &[&str] = &[
-    "/etc/security/limits.d/play.conf",
-];
+const FILE_WHITELIST: &[&str] = &["/etc/security/limits.d/play.conf"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -122,8 +120,8 @@ fn sysfs_write(path: &str, value: &str) -> ExitCode {
     };
 
     // Security check: only allow whitelisted paths (or CPU governor patterns)
-    let is_allowed = SYSFS_WHITELIST.contains(&full_path.as_str())
-        || is_cpu_governor_path(&full_path);
+    let is_allowed =
+        SYSFS_WHITELIST.contains(&full_path.as_str()) || is_cpu_governor_path(&full_path);
 
     if !is_allowed {
         eprintln!("Error: sysfs path '{}' is not in the whitelist", full_path);
@@ -137,8 +135,7 @@ fn sysfs_write(path: &str, value: &str) -> ExitCode {
 /// Check if path is a CPU governor path (allowed pattern for per-CPU control).
 /// Format: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
 fn is_cpu_governor_path(path: &str) -> bool {
-    path.contains("/sys/devices/system/cpu/")
-        && path.contains("/cpufreq/scaling_governor")
+    path.contains("/sys/devices/system/cpu/") && path.contains("/cpufreq/scaling_governor")
 }
 
 fn write_file(path: &str, content: &str) -> ExitCode {
@@ -177,7 +174,7 @@ fn batch_execute(json: &str) -> ExitCode {
             BatchedTweakCommand::UlimitNofile(value) => {
                 let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
                 write_file("/etc/security/limits.d/play.conf", &content)
-            }
+            },
         };
         if result != ExitCode::SUCCESS {
             failed = true;
@@ -199,7 +196,10 @@ mod tests {
     fn test_batched_tweak_serialization() {
         let commands = vec![
             BatchedTweakCommand::SysctlWrite("vm.max_map_count".to_string(), "8388608".to_string()),
-            BatchedTweakCommand::SysfsWrite("/sys/kernel/mm/transparent_hugepage/enabled".to_string(), "madvise".to_string()),
+            BatchedTweakCommand::SysfsWrite(
+                "/sys/kernel/mm/transparent_hugepage/enabled".to_string(),
+                "madvise".to_string(),
+            ),
         ];
 
         let json = serde_json::to_string(&commands).unwrap();

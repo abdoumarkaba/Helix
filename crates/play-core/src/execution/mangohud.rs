@@ -108,7 +108,8 @@ pub struct MangoHudSession {
 impl MangoHudSession {
     /// Create a new MangoHud session.
     pub fn new(game_name: String) -> Self {
-        let session_id = format!("mangohud_{}", Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+        let session_id =
+            format!("mangohud_{}", Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
         Self {
             session_id,
             started_at: Utc::now(),
@@ -150,7 +151,8 @@ impl MangoHudSession {
     where
         F: Fn(&MangoHudSample) -> f32,
     {
-        let mut values: Vec<f32> = samples.iter().map(&extractor).filter(|&v| v.is_finite()).collect();
+        let mut values: Vec<f32> =
+            samples.iter().map(&extractor).filter(|&v| v.is_finite()).collect();
 
         if values.is_empty() {
             return MetricStats {
@@ -174,20 +176,15 @@ impl MangoHudSession {
         let percentile_1 = values.get(percentile_1_idx).copied().unwrap_or(min);
         let percentile_0_1 = values.get(percentile_0_1_idx).copied().unwrap_or(min);
 
-        MetricStats {
-            avg,
-            min,
-            max,
-            percentile_1,
-            percentile_0_1,
-        }
+        MetricStats { avg, min, max, percentile_1, percentile_0_1 }
     }
 
     /// Write session to a JSON file.
     pub fn write_to_file(&self, path: &Path) -> Result<(), PlayError> {
-        let content = serde_json::to_string_pretty(self).map_err(|e| PlayError::ValidationFailed {
-            reason: format!("Failed to serialize MangoHud session: {e}"),
-        })?;
+        let content =
+            serde_json::to_string_pretty(self).map_err(|e| PlayError::ValidationFailed {
+                reason: format!("Failed to serialize MangoHud session: {e}"),
+            })?;
         fs::write(path, content).map_err(|e| PlayError::ValidationFailed {
             reason: format!("Failed to write MangoHud session file: {e}"),
         })
@@ -275,7 +272,10 @@ impl MangoHudParser {
         };
 
         let parse_optional = |idx: usize| -> Option<f32> {
-            parts.get(idx).and_then(|s| s.trim().parse::<f32>().ok()).filter(|&v| v.is_finite() && v > 0.0)
+            parts
+                .get(idx)
+                .and_then(|s| s.trim().parse::<f32>().ok())
+                .filter(|&v| v.is_finite() && v > 0.0)
         };
 
         Ok(MangoHudSample {
@@ -324,11 +324,7 @@ impl MangoHudConfig {
         let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
         let log_path = log_dir.join(format!("mangohud_{}.csv", timestamp));
 
-        Self {
-            log_path,
-            enabled: true,
-            format: LogFormat::Csv,
-        }
+        Self { log_path, enabled: true, format: LogFormat::Csv }
     }
 
     /// Get the environment variables needed to configure MangoHud.

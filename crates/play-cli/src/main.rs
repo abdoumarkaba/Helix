@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
-use serde_json::Value as JsonValue;
 use console::{style, Term};
 use dirs::data_dir;
 use indicatif::{ProgressBar, ProgressStyle};
+use serde_json::Value as JsonValue;
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 
@@ -81,10 +81,7 @@ struct CliArgs {
 // ---------------------------------------------------------------------------
 
 fn get_log_dir() -> PathBuf {
-    data_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-        .join("play")
-        .join("logs")
+    data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("logs")
 }
 
 fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
@@ -97,10 +94,8 @@ fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
 
     // Generate per-run log filename: play-{timestamp}-{game_name}.log
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let game_name = exe_path
-        .and_then(|p| p.file_stem())
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown");
+    let game_name =
+        exe_path.and_then(|p| p.file_stem()).and_then(|s| s.to_str()).unwrap_or("unknown");
     let log_filename = format!("play-{}-{}.log", timestamp, game_name);
     let log_path = log_dir.join(&log_filename);
 
@@ -125,7 +120,12 @@ fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
         .with_target(false);
 
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false).with_target(false))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .with_target(false),
+        )
         .with(console_layer)
         .with(tracing_subscriber::EnvFilter::new(filter))
         .init();
@@ -152,10 +152,7 @@ fn display_error_with_context(
     // Extract error-specific context
     let error_context = match error {
         PlayError::RunnerDownload { url, attempt, reason } => {
-            Some(format!(
-                "  URL: {}\n  Attempt: {}/3\n  Reason: {}",
-                url, attempt, reason
-            ))
+            Some(format!("  URL: {}\n  Attempt: {}/3\n  Reason: {}", url, attempt, reason))
         },
         PlayError::PackageInstall { pm, package, .. } => {
             Some(format!("  Package manager: {}\n  Package: {}", pm, package))
@@ -192,10 +189,7 @@ fn display_error_with_context(
                 "    3. Check the log file for details: {}",
                 style(log_path.display()).cyan()
             );
-            eprintln!(
-                "    4. Try again: {}",
-                style(format!("play {}", exe_path.display())).cyan()
-            );
+            eprintln!("    4. Try again: {}", style(format!("play {}", exe_path.display())).cyan());
             eprintln!(
                 "    5. Or rollback: {}",
                 style(format!("play --undo {}", exe_path.display())).cyan()
@@ -208,10 +202,7 @@ fn display_error_with_context(
                 "    3. Check the log file for details: {}",
                 style(log_path.display()).cyan()
             );
-            eprintln!(
-                "    4. Try again: {}",
-                style(format!("play {}", exe_path.display())).cyan()
-            );
+            eprintln!("    4. Try again: {}", style(format!("play {}", exe_path.display())).cyan());
             eprintln!(
                 "    5. Or rollback: {}",
                 style(format!("play --undo {}", exe_path.display())).cyan()
@@ -271,10 +262,7 @@ fn display_error_with_context(
                 "    1. Check the log file for details: {}",
                 style(log_path.display()).cyan()
             );
-            eprintln!(
-                "    2. Try again: {}",
-                style(format!("play {}", exe_path.display())).cyan()
-            );
+            eprintln!("    2. Try again: {}", style(format!("play {}", exe_path.display())).cyan());
             eprintln!(
                 "    3. Or rollback: {}",
                 style(format!("play --undo {}", exe_path.display())).cyan()
@@ -296,12 +284,14 @@ fn show_log_path(_log_path: &Path) {
 // ---------------------------------------------------------------------------
 
 fn review_mangohud_logs() -> Result<(), PlayError> {
-    let log_dir = data_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-        .join("play/logs");
+    let log_dir = data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play/logs");
 
     if !log_dir.exists() {
-        eprintln!("{} No MangoHud logs directory found: {}", style("Error:").red().bold(), log_dir.display());
+        eprintln!(
+            "{} No MangoHud logs directory found: {}",
+            style("Error:").red().bold(),
+            log_dir.display()
+        );
         eprintln!("  Run a game with MangoHud enabled to generate logs");
         return Ok(());
     }
@@ -319,19 +309,29 @@ fn review_mangohud_logs() -> Result<(), PlayError> {
         .collect();
 
     if log_files.is_empty() {
-        eprintln!("{} No MangoHud log files found in: {}", style("Info:").cyan(), log_dir.display());
+        eprintln!(
+            "{} No MangoHud log files found in: {}",
+            style("Info:").cyan(),
+            log_dir.display()
+        );
         eprintln!("  Run a game with MangoHud enabled to generate logs");
         return Ok(());
     }
 
     // Sort by modification time (newest first)
     log_files.sort_by(|a, b| {
-        let a_time = std::fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
-        let b_time = std::fs::metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+        let a_time =
+            std::fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+        let b_time =
+            std::fs::metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
         b_time.cmp(&a_time)
     });
 
-    println!("{} Found {} MangoHud log file(s)", style("MangoHud Logs:").green().bold(), log_files.len());
+    println!(
+        "{} Found {} MangoHud log file(s)",
+        style("MangoHud Logs:").green().bold(),
+        log_files.len()
+    );
     println!();
 
     for (idx, log_path) in log_files.iter().enumerate() {
@@ -356,16 +356,20 @@ fn review_mangohud_logs() -> Result<(), PlayError> {
         match MangoHudParser::parse_csv(log_path, file_name.to_string()) {
             Ok(session) => {
                 if let Some(fps_stats) = session.fps_stats {
-                    println!("     {} FPS: avg={:.1}, min={:.1}, max={:.1}, 1% low={:.1}",
+                    println!(
+                        "     {} FPS: avg={:.1}, min={:.1}, max={:.1}, 1% low={:.1}",
                         style("✓").green(),
-                        fps_stats.avg, fps_stats.min, fps_stats.max, fps_stats.percentile_1
+                        fps_stats.avg,
+                        fps_stats.min,
+                        fps_stats.max,
+                        fps_stats.percentile_1
                     );
                 }
                 println!("     Samples: {}", session.samples.len());
             },
             Err(e) => {
                 println!("     {} Failed to parse: {}", style("⚠").yellow(), e);
-            }
+            },
         }
         println!();
     }
@@ -374,7 +378,11 @@ fn review_mangohud_logs() -> Result<(), PlayError> {
     if log_files.len() == 1 {
         review_single_log(&log_files[0])?;
     } else {
-        eprintln!("{} Enter log number to review (1-{}), or 0 to exit: ", style("Select:").cyan(), log_files.len());
+        eprintln!(
+            "{} Enter log number to review (1-{}), or 0 to exit: ",
+            style("Select:").cyan(),
+            log_files.len()
+        );
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).ok();
 
@@ -528,10 +536,8 @@ fn write_metrics(
 
 fn undo_game(exe_path: &Path) -> Result<(), PlayError> {
     // Scan for checkpoint matching this exe_path
-    let games_root = data_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-        .join("play")
-        .join("games");
+    let games_root =
+        data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games");
 
     let matching_checkpoint = find_checkpoint_by_exe_path(&games_root, exe_path)?;
 
@@ -621,7 +627,8 @@ fn create_orchestrator(
         data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games");
 
     // Check if there's an existing checkpoint for this exe
-    if let Ok(Some((state_root, _checkpoint))) = find_checkpoint_by_exe_path(&games_root, exe_path) {
+    if let Ok(Some((state_root, _checkpoint))) = find_checkpoint_by_exe_path(&games_root, exe_path)
+    {
         // Use existing state directory for recovery
         return Orchestrator::with_roots(
             PathBuf::from("/proc"),
@@ -660,7 +667,7 @@ fn main() {
             _ => {
                 eprintln!("Error: Unsupported shell '{}'. Supported: bash, zsh, fish", shell_name);
                 std::process::exit(1);
-            }
+            },
         };
         let mut cmd = CliArgs::command();
         generate(shell, &mut cmd, "play", &mut std::io::stdout());
@@ -732,8 +739,7 @@ fn main() {
             .join("play")
             .join("games");
 
-        let matching = find_checkpoint_by_exe_path(&games_root, &exe_path)
-            .unwrap_or(None);
+        let matching = find_checkpoint_by_exe_path(&games_root, &exe_path).unwrap_or(None);
 
         let Some((state_root, _)) = matching else {
             eprintln!("{} No previous session found for this game", style("Error:").red().bold());
@@ -798,9 +804,16 @@ fn main() {
     // Check for fast launch from validated checkpoint
     if orchestrator.can_fast_launch() {
         let checkpoint_path = find_checkpoint_by_exe_path(
-            &data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games"),
-            &exe_path
-        ).ok().flatten().map(|(p, _)| p).unwrap_or_else(|| PathBuf::from("unknown"));
+            &data_dir()
+                .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+                .join("play")
+                .join("games"),
+            &exe_path,
+        )
+        .ok()
+        .flatten()
+        .map(|(p, _)| p)
+        .unwrap_or_else(|| PathBuf::from("unknown"));
 
         println!(
             "  {} Checkpoint found at {}, launching from saved configuration...",
@@ -822,13 +835,9 @@ fn main() {
                 std::process::exit(0);
             },
             Err(e) => {
-                eprintln!(
-                    "\n  {} Fast launch failed: {}",
-                    style("Warning:").yellow(),
-                    e
-                );
+                eprintln!("\n  {} Fast launch failed: {}", style("Warning:").yellow(), e);
                 eprintln!("  Falling back to full setup...\n");
-            }
+            },
         }
     }
 
@@ -876,7 +885,8 @@ fn main() {
                     );
                     println!(
                         "  {}",
-                        style("Press Ctrl+C to stop monitoring (game continues in background)").dim()
+                        style("Press Ctrl+C to stop monitoring (game continues in background)")
+                            .dim()
                     );
                 } else {
                     println!(
@@ -893,7 +903,9 @@ fn main() {
                         .unwrap_or_else(|| PathBuf::from("~/.local/share"))
                         .join("play")
                         .join("games");
-                    if let Ok(Some((state_root, _))) = find_checkpoint_by_exe_path(&games_root, &exe_path) {
+                    if let Ok(Some((state_root, _))) =
+                        find_checkpoint_by_exe_path(&games_root, &exe_path)
+                    {
                         if let Err(e) = write_metrics(
                             &state_root,
                             env,
@@ -916,10 +928,7 @@ fn main() {
         Err(e) => {
             error!(event = "run_failed", error = %e, "Orchestrator failed");
 
-            eprintln!(
-                "\n  {}",
-                style("Game session failed").red().bold()
-            );
+            eprintln!("\n  {}", style("Game session failed").red().bold());
 
             // Display error with full context including rollback info
             display_error_with_context(&e, &exe_path, &log_path, orchestrator.rollback_manifest());
@@ -950,5 +959,4 @@ mod tests {
         let parsed = CliArgs::parse_from(args);
         assert!(parsed.yes);
     }
-
 }

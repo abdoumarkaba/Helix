@@ -13,8 +13,8 @@ use crate::models::environment::{
 };
 use crate::models::errors::PlayError;
 use crate::models::plan::{
-    PrefixAction, RunnerAction, RunnersManifest, SystemTweak, TweakConstraint,
-    TweakDecision, TweakId,
+    PrefixAction, RunnerAction, RunnersManifest, SystemTweak, TweakConstraint, TweakDecision,
+    TweakId,
 };
 
 use super::super::models::environment::HardwareProfile;
@@ -99,8 +99,10 @@ impl DecisionEngine {
 
     /// Async compilation must be disabled for VAC/EAC/BattlEye-protected games.
     /// Also disabled on first run when DXVK cache doesn't exist to avoid compounding overhead.
-    pub fn configure_dxvk_async(anti_cheat: &[AntiCheat], cache_path: Option<&std::path::Path>) -> (bool, ResolutionDecision) {
-
+    pub fn configure_dxvk_async(
+        anti_cheat: &[AntiCheat],
+        cache_path: Option<&std::path::Path>,
+    ) -> (bool, ResolutionDecision) {
         // Check anti-cheat first (always disable if present)
         if anti_cheat.iter().any(|ac| {
             matches!(
@@ -220,22 +222,23 @@ impl DecisionEngine {
     // Windows version
     // -----------------------------------------------------------------------
 
-    pub fn select_windows_version(dx_version: DirectXVersion) -> (WindowsVersion, ResolutionDecision) {
-        let (version, reason, source) =
-            if dx_version == DirectXVersion::D3D9 {
-                // Some old D3D9 games reject Win10; Win7 has better compatibility.
-                (
+    pub fn select_windows_version(
+        dx_version: DirectXVersion,
+    ) -> (WindowsVersion, ResolutionDecision) {
+        let (version, reason, source) = if dx_version == DirectXVersion::D3D9 {
+            // Some old D3D9 games reject Win10; Win7 has better compatibility.
+            (
                 WindowsVersion::Win7,
                 "D3D9 game detected; Windows 7 avoids compatibility rejections from old titles.",
                 DecisionSource::Heuristic,
             )
-            } else {
-                (
-                    WindowsVersion::Win10,
-                    "Default to Windows 10; best compatibility for post-2012 titles.",
-                    DecisionSource::Heuristic,
-                )
-            };
+        } else {
+            (
+                WindowsVersion::Win10,
+                "Default to Windows 10; best compatibility for post-2012 titles.",
+                DecisionSource::Heuristic,
+            )
+        };
 
         (
             version,
@@ -380,10 +383,8 @@ impl DecisionEngine {
         }
 
         // Not found anywhere, need to download
-        let release = manifest
-            .runners
-            .iter()
-            .find(|r| r.runner_type == runner_type && &r.version == version);
+        let release =
+            manifest.runners.iter().find(|r| r.runner_type == runner_type && &r.version == version);
         match release {
             Some(r) => Ok(RunnerAction::Download {
                 url: r.url.clone(),
