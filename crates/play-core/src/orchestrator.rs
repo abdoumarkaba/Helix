@@ -980,7 +980,7 @@ impl Orchestrator {
         match &entry.restore_method {
             RestoreMethod::Sysctl { key } => {
                 self.cmd_runner
-                    .run_command("play-helper", &["sysctl-write", key, &entry.previous_value])
+                    .run_command("helix-helper", &["sysctl-write", key, &entry.previous_value])
                     .map_err(|e| PlayError::RollbackFailed {
                         key: entry.key.clone(),
                         reason: e,
@@ -995,7 +995,7 @@ impl Orchestrator {
                     "Never" => "never",
                     other => other,
                 };
-                self.cmd_runner.run_command("play-helper", &["sysfs-write", path, value]).map_err(
+                self.cmd_runner.run_command("helix-helper", &["sysfs-write", path, value]).map_err(
                     |e| PlayError::RollbackFailed {
                         key: entry.key.clone(),
                         reason: e,
@@ -1006,7 +1006,7 @@ impl Orchestrator {
             },
             RestoreMethod::FileWrite { path } => {
                 self.cmd_runner
-                    .run_command("play-helper", &["write-file", path, &entry.previous_value])
+                    .run_command("helix-helper", &["write-file", path, &entry.previous_value])
                     .map_err(|e| PlayError::RollbackFailed {
                         key: entry.key.clone(),
                         reason: e,

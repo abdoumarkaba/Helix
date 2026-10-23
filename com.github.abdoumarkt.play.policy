@@ -14,7 +14,7 @@
       <allow_inactive>auth_admin</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/play-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/helix-helper</annotate>
     <annotate key="org.freedesktop.policykit.exec.argv1">sysctl-write</annotate>
   </action>
 
@@ -26,7 +26,7 @@
       <allow_inactive>auth_admin</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/play-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/helix-helper</annotate>
     <annotate key="org.freedesktop.policykit.exec.argv1">sysfs-write</annotate>
   </action>
 
@@ -38,7 +38,7 @@
       <allow_inactive>auth_admin</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/play-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/helix-helper</annotate>
     <annotate key="org.freedesktop.policykit.exec.argv1">write-file</annotate>
   </action>
 </policyconfig>

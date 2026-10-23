@@ -12,7 +12,7 @@
 //! session-scoped tweaks are automatically restored.
 //!
 //! Class B tweaks are persistent (sysctl, limits.d). They are written via
-//! `play-helper` and recorded in a rollback manifest for manual restore if
+//! `helix-helper` and recorded in a rollback manifest for manual restore if
 //! the process crashes before Drop runs.
 
 use std::path::PathBuf;
@@ -58,7 +58,7 @@ impl ActiveGuards {
 pub struct SystemModule {
     /// Injectable sysfs root (e.g. `/` in production, tempdir in tests).
     sys_root: PathBuf,
-    /// Injectable command runner (routes through play-helper in production).
+    /// Injectable command runner (routes through helix-helper in production).
     cmd_runner: Box<dyn CommandRunner>,
 }
 
@@ -70,7 +70,7 @@ impl SystemModule {
     /// Apply all planned system tweaks.
     ///
     /// Class A tweaks (session-scoped) use RAII guards returned in `ActiveGuards`.
-    /// Class B tweaks (persistent) are batched and written via play-helper.
+    /// Class B tweaks (persistent) are batched and written via helix-helper.
     ///
     /// Returns `ActiveGuards` containing session-scoped guards.
     ///
@@ -161,13 +161,13 @@ impl SystemModule {
             reason: format!("Failed to serialize batch commands: {e}"),
         })?;
 
-        match self.cmd_runner.run_command("pkexec", &["play-helper", "batch", &json]) {
+        match self.cmd_runner.run_command("pkexec", &["helix-helper", "batch", &json]) {
             Ok(_) => {
                 tracing::info!("Batched {} system tweaks applied successfully", commands.len());
                 Ok(())
             },
             Err(e) => {
-                // Log warning but don't fail - allows testing without play-helper privileges
+                // Log warning but don't fail - allows testing without helix-helper privileges
                 tracing::warn!("Batched system tweaks failed (requires elevated helper): {}", e);
                 tracing::warn!("Skipping system tweaks - game may still work but with suboptimal performance");
                 Ok(())
@@ -220,7 +220,7 @@ impl SystemModule {
                 Ok(())
             },
 
-            // --- Class B: persistent sysctl writes via play-helper ---
+            // --- Class B: persistent sysctl writes via helix-helper ---
             SystemTweak::VmMaxMapCount { target } => {
                 self.write_sysctl("vm.max_map_count", &target.to_string())
             },
@@ -255,18 +255,18 @@ impl SystemModule {
         }
     }
 
-    /// Write a sysctl value via pkexec play-helper.
+    /// Write a sysctl value via pkexec helix-helper.
     /// Prompts user for password via polkit if needed.
     /// Logs warning instead of failing for development/testing without proper privileges.
     fn write_sysctl(&self, key: &str, value: &str) -> Result<(), PlayError> {
         // Try with pkexec for privilege escalation via polkit
-        match self.cmd_runner.run_command("pkexec", &["play-helper", "sysctl-write", key, value]) {
+        match self.cmd_runner.run_command("pkexec", &["helix-helper", "sysctl-write", key, value]) {
             Ok(_) => {
                 tracing::info!("Sysctl {} = {} applied successfully", key, value);
                 Ok(())
             },
             Err(e) => {
-                // Log warning but don't fail - allows testing without play-helper privileges
+                // Log warning but don't fail - allows testing without helix-helper privileges
                 tracing::warn!("Sysctl write to {} failed (requires elevated helper): {}", key, e);
                 tracing::warn!(
                     "Skipping system tweak - game may still work but with suboptimal performance"
@@ -276,18 +276,18 @@ impl SystemModule {
         }
     }
 
-    /// Write a sysfs file via pkexec play-helper.
+    /// Write a sysfs file via pkexec helix-helper.
     /// Prompts user for password via polkit if needed.
     /// Logs warning instead of failing for development/testing without proper privileges.
     fn write_sysfs_file(&self, path: &str, value: &str) -> Result<(), PlayError> {
         // Try with pkexec for privilege escalation via polkit
-        match self.cmd_runner.run_command("pkexec", &["play-helper", "sysfs-write", path, value]) {
+        match self.cmd_runner.run_command("pkexec", &["helix-helper", "sysfs-write", path, value]) {
             Ok(_) => {
                 tracing::info!("Sysfs {} = {} applied successfully", path, value);
                 Ok(())
             },
             Err(e) => {
-                // Log warning but don't fail - allows testing without play-helper privileges
+                // Log warning but don't fail - allows testing without helix-helper privileges
                 tracing::warn!("Sysfs write to {} failed (requires elevated helper): {}", path, e);
                 tracing::warn!(
                     "Skipping system tweak - game may still work but with suboptimal performance"
@@ -297,21 +297,21 @@ impl SystemModule {
         }
     }
 
-    /// Write to /etc/security/limits.d/play.conf via pkexec play-helper.
+    /// Write to /etc/security/limits.d/helix.conf via pkexec helix-helper.
     /// Prompts user for password via polkit if needed.
     /// Logs warning instead of failing for development/testing without proper privileges.
     fn write_limits_d(&self, value: u64) -> Result<(), PlayError> {
         let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
         match self.cmd_runner.run_command(
             "pkexec",
-            &["play-helper", "write-file", "/etc/security/limits.d/play.conf", &content],
+            &["helix-helper", "write-file", "/etc/security/limits.d/helix.conf", &content],
         ) {
             Ok(_) => {
                 tracing::info!("Ulimit nofile = {} applied successfully", value);
                 Ok(())
             },
             Err(e) => {
-                // Log warning but don't fail - allows testing without play-helper privileges
+                // Log warning but don't fail - allows testing without helix-helper privileges
                 tracing::warn!(
                     "Sysctl write to ulimit-nofile failed (requires elevated helper): {}",
                     e
@@ -467,8 +467,8 @@ mod tests {
 
     fn governor_responses() -> Vec<(String, Result<String, String>)> {
         vec![
-            ("play-helper-sysfs-read".to_owned(), Ok("schedutil".to_owned())),
-            ("play-helper-sysfs-write".to_owned(), Ok(String::new())),
+            ("helix-helper-sysfs-read".to_owned(), Ok("schedutil".to_owned())),
+            ("helix-helper-sysfs-write".to_owned(), Ok(String::new())),
         ]
     }
 
@@ -559,7 +559,7 @@ mod tests {
         // Now uses pkexec with batched commands
         assert!(calls
             .iter()
-            .any(|c| c.0 == "pkexec" && c.1[0] == "play-helper" && c.1[1] == "batch"));
+            .any(|c| c.0 == "pkexec" && c.1[0] == "helix-helper" && c.1[1] == "batch"));
     }
 
     #[test]
@@ -600,10 +600,10 @@ mod tests {
 
         // Governor succeeds, sysctl-write fails - but should gracefully degrade
         let runner = MockCommandRunner::new(vec![
-            ("play-helper-sysfs-read".to_owned(), Ok("schedutil".to_owned())),
-            ("play-helper-sysfs-write".to_owned(), Ok(String::new())),
-            // pkexec play-helper returns error (simulating user cancel or failure)
-            ("pkexec-play-helper".to_owned(), Err("permission denied".to_owned())),
+            ("helix-helper-sysfs-read".to_owned(), Ok("schedutil".to_owned())),
+            ("helix-helper-sysfs-write".to_owned(), Ok(String::new())),
+            // pkexec helix-helper returns error (simulating user cancel or failure)
+            ("pkexec-helix-helper".to_owned(), Err("permission denied".to_owned())),
         ]);
         let module = SystemModule::new(dir.path().to_owned(), Box::new(runner));
 

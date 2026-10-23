@@ -33,7 +33,7 @@ impl GovernorGuard {
     /// - `sys_root`: injectable root path (e.g. `/` in production, temp dir in tests).
     /// - `is_laptop_cpu`: if true, returns a no-op guard without touching sysfs.
     /// - `cmd_runner`: injectable command runner. In production, routes through
-    ///   `play-helper` for privilege escalation; in tests, use a mock.
+    ///   `helix-helper` for privilege escalation; in tests, use a mock.
     ///
     /// Returns an error only if a sysfs write fails after successfully reading
     /// the previous value (partial application is cleaned up by dropping the
@@ -77,7 +77,7 @@ impl GovernorGuard {
         for path in &entries {
             let path_str = path.to_string_lossy();
             let previous = cmd_runner
-                .run_command("play-helper", &["sysfs-read", &path_str])
+                .run_command("helix-helper", &["sysfs-read", &path_str])
                 .map_err(|e| PlayError::GovernorWrite {
                     core: path.display().to_string(),
                     reason: format!("read failed: {e}"),
@@ -86,13 +86,13 @@ impl GovernorGuard {
                 .to_owned();
 
             cmd_runner
-                .run_command("play-helper", &["sysfs-write", &path_str, "performance"])
+                .run_command("helix-helper", &["sysfs-write", &path_str, "performance"])
                 .map_err(|e| {
                     // Manual rollback of already-written cores (can't clone Box<dyn CommandRunner>)
                     for (prev_path, prev_val) in cores.iter().rev() {
                         let prev_path_str = prev_path.to_string_lossy();
                         let _ = cmd_runner
-                            .run_command("play-helper", &["sysfs-write", &prev_path_str, prev_val]);
+                            .run_command("helix-helper", &["sysfs-write", &prev_path_str, prev_val]);
                     }
                     PlayError::GovernorWrite {
                         core: path.display().to_string(),
@@ -125,7 +125,7 @@ impl Drop for GovernorGuard {
         for (path, previous) in self.cores.iter().rev() {
             let path_str = path.to_string_lossy();
             if let Err(e) =
-                self.cmd_runner.run_command("play-helper", &["sysfs-write", &path_str, previous])
+                self.cmd_runner.run_command("helix-helper", &["sysfs-write", &path_str, previous])
             {
                 // NEVER panic in Drop — log the error and continue
                 tracing::error!(
@@ -166,8 +166,8 @@ mod tests {
 
     type CallLog = Arc<Mutex<Vec<(String, Vec<String>)>>>;
 
-    /// Mock that simulates `play-helper sysfs-read <path>` and
-    /// `play-helper sysfs-write <path> <value>` by reading/writing real
+    /// Mock that simulates `helix-helper sysfs-read <path>` and
+    /// `helix-helper sysfs-write <path> <value>` by reading/writing real
     /// tempdir files. This preserves integration semantics while routing
     /// through the CommandRunner interface.
     ///
@@ -195,7 +195,7 @@ mod tests {
                 .unwrap()
                 .push((program.to_owned(), args.iter().map(|s| (*s).to_owned()).collect()));
 
-            if program != "play-helper" {
+            if program != "helix-helper" {
                 return Err(format!("unexpected program: {program}"));
             }
 
@@ -211,7 +211,7 @@ mod tests {
                         .map_err(|e| format!("write failed: {e}"))?;
                     Ok(String::new())
                 },
-                _ => Err(format!("unexpected play-helper subcommand: {:?}", args)),
+                _ => Err(format!("unexpected helix-helper subcommand: {:?}", args)),
             }
         }
 
@@ -348,23 +348,23 @@ mod tests {
         let calls = runner.calls();
 
         // First call should be sysfs-read for cpu0
-        assert_eq!(calls[0].0, "play-helper");
+        assert_eq!(calls[0].0, "helix-helper");
         assert_eq!(calls[0].1[0], "sysfs-read");
         assert!(calls[0].1[1].contains("cpu0"));
 
         // Second call should be sysfs-write for cpu0
-        assert_eq!(calls[1].0, "play-helper");
+        assert_eq!(calls[1].0, "helix-helper");
         assert_eq!(calls[1].1[0], "sysfs-write");
         assert!(calls[1].1[1].contains("cpu0"));
         assert_eq!(calls[1].1[2], "performance");
 
         // Third call should be sysfs-read for cpu1
-        assert_eq!(calls[2].0, "play-helper");
+        assert_eq!(calls[2].0, "helix-helper");
         assert_eq!(calls[2].1[0], "sysfs-read");
         assert!(calls[2].1[1].contains("cpu1"));
 
         // Fourth call should be sysfs-write for cpu1
-        assert_eq!(calls[3].0, "play-helper");
+        assert_eq!(calls[3].0, "helix-helper");
         assert_eq!(calls[3].1[0], "sysfs-write");
         assert!(calls[3].1[1].contains("cpu1"));
         assert_eq!(calls[3].1[2], "performance");

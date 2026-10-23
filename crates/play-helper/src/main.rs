@@ -15,7 +15,7 @@ enum BatchedTweakCommand {
 }
 
 /// Whitelist of allowed sysfs paths for security.
-/// Only these paths can be written to via play-helper.
+/// Only these paths can be written to via helix-helper.
 const SYSFS_WHITELIST: &[&str] = &[
     // Transparent Huge Pages configuration
     "/sys/kernel/mm/transparent_hugepage/enabled",
@@ -28,7 +28,7 @@ const SYSFS_WHITELIST: &[&str] = &[
 ];
 
 /// Whitelist of allowed sysctl keys for security.
-/// Only these keys can be written to via play-helper.
+/// Only these keys can be written to via helix-helper.
 const SYSCTL_WHITELIST: &[&str] = &[
     "vm.max_map_count",
     "kernel.sched_autogroup",
@@ -46,7 +46,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: play-helper <subcommand> [args...]");
+        eprintln!("Usage: helix-helper <subcommand> [args...]");
         eprintln!("Subcommands:");
         eprintln!("  sysctl-write <key> <value>   - Write to /proc/sys/<key>");
         eprintln!("  sysfs-write <path> <value>   - Write to /sys/<path>");
@@ -58,7 +58,7 @@ fn main() -> ExitCode {
     match args[1].as_str() {
         "sysctl-write" => {
             if args.len() != 4 {
-                eprintln!("Usage: play-helper sysctl-write <key> <value>");
+                eprintln!("Usage: helix-helper sysctl-write <key> <value>");
                 return ExitCode::FAILURE;
             }
             let key = &args[2];
@@ -67,7 +67,7 @@ fn main() -> ExitCode {
         },
         "sysfs-write" => {
             if args.len() != 4 {
-                eprintln!("Usage: play-helper sysfs-write <path> <value>");
+                eprintln!("Usage: helix-helper sysfs-write <path> <value>");
                 return ExitCode::FAILURE;
             }
             let path = &args[2];
@@ -76,7 +76,7 @@ fn main() -> ExitCode {
         },
         "write-file" => {
             if args.len() != 4 {
-                eprintln!("Usage: play-helper write-file <path> <content>");
+                eprintln!("Usage: helix-helper write-file <path> <content>");
                 return ExitCode::FAILURE;
             }
             let path = &args[2];
@@ -85,7 +85,7 @@ fn main() -> ExitCode {
         },
         "batch" => {
             if args.len() != 3 {
-                eprintln!("Usage: play-helper batch <json>");
+                eprintln!("Usage: helix-helper batch <json>");
                 return ExitCode::FAILURE;
             }
             let json = &args[2];

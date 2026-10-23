@@ -416,7 +416,7 @@ pub struct SystemTuning {
     pub fsync: bool,
     pub gamemode: bool,
     /// NVIDIA clock lock value in MHz (95% of VBIOS max, rounded to 15 MHz step).
-    /// Stored here for audit trail; applied via play-helper.
+    /// Stored here for audit trail; applied via helix-helper.
     pub nvidia_clock_lock_mhz: Option<u32>,
 }
 
@@ -532,7 +532,7 @@ pub struct SteamInstallation {
 // Batched System Tweak Commands
 // ---------------------------------------------------------------------------
 
-/// Batched system tweak command for play-helper.
+/// Batched system tweak command for helix-helper.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum BatchedTweakCommand {
