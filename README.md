@@ -186,10 +186,7 @@ Real-world testing on Fedora 43 with NVIDIA RTX 3050 Laptop (6GB VRAM):
 
 | Game | Result | Notes |
 |------|--------|-------|
-| **Sekiro: Shadows Die Twice** | ✅ High FPS, no stutters | Smooth gameplay throughout |
-| **Elden Ring** | ✅ High FPS, no stutters | Excellent performance |
-| **RimWorld** | ✅ 90 FPS @ 30% GPU | Verified stable |
-| **Max Payne 3** | ✅ High FPS, no stutters | No issues detected |
+| **A Short Hike** | ✅ Stable performance | Verified stable with Unity engine |
 
 ---
 

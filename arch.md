@@ -135,7 +135,7 @@ Polkit policy: `/usr/share/polkit-1/actions/com.github.abdoumarkt.play.policy`
 - Package installation
 - Kernel parameter existence checks (sched_autogroup)
 - Helpful error messages for permission issues
-- **Game launch and execution**, RimWorld for test (verified working: 90fps @ 30% GPU usage)
+- **Game launch and execution**, A Short Hike for test (verified working: 90fps @ 30% GPU usage)
 
 ### ✅ Recent Fixes
 
@@ -185,7 +185,7 @@ Fixed. Ulimit now applies to the game process immediately.
 **1. Long startup time (~10 minutes)**
 
 **Symptoms:**
-- RimWorld took ~10 minutes from launch to playable state
+- A Short Hike took ~10 minutes from launch to playable state
 - 2-minute stall at 0fps during initial launch (MangoHud)
 - Wayland compositor shows "not responding" dialog during stalls
 - Game eventually stabilizes at 90fps with 30% GPU usage
