@@ -136,16 +136,27 @@ impl PrefixModule {
     pub fn execute(&self, action: &PrefixAction) -> Result<PathBuf, PlayError> {
         match action {
             PrefixAction::AlreadyExists { path } => {
+                let wine_prefix = if path.join("pfx").exists() { path.join("pfx") } else { path.clone() };
                 tracing::info!(
                     event = "prefix_already_exists",
-                    path = %path.display(),
+                    path = %wine_prefix.display(),
                     "Prefix already exists, verifying"
                 );
-                Self::verify_prefix(path)?;
+                Self::verify_prefix(&wine_prefix)?;
                 Ok(path.clone())
             },
             PrefixAction::Create { path, arch, windows_version } => {
-                if path.exists() {
+                let pfx_path = path.join("pfx");
+                if pfx_path.exists() && pfx_path.join("system.reg").exists() {
+                    tracing::info!(
+                        event = "prefix_already_exists",
+                        path = %pfx_path.display(),
+                        "Prefix directory exists, verifying"
+                    );
+                    Self::verify_prefix(&pfx_path)?;
+                    return Ok(path.clone());
+                }
+                if path.exists() && path.join("system.reg").exists() {
                     tracing::info!(
                         event = "prefix_already_exists",
                         path = %path.display(),
@@ -171,11 +182,11 @@ impl PrefixModule {
                     })?;
                 }
 
-                // Create prefix via wineboot
+                // Create prefix via wineboot (creates pfx/ subdirectory)
                 self.create_prefix(path, *arch)?;
 
-                // Set Windows version
-                self.set_windows_version(path, *windows_version)?;
+                // Set Windows version on the actual wine prefix (pfx/)
+                self.set_windows_version(&path.join("pfx"), *windows_version)?;
 
                 tracing::info!(
                     event = "prefix_created",
