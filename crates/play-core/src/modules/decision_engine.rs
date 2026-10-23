@@ -315,15 +315,11 @@ impl DecisionEngine {
     // Prefix architecture
     // -----------------------------------------------------------------------
 
-    pub fn select_prefix_arch(pe_arch: PeArchitecture) -> (WineArch, ResolutionDecision) {
-        let (arch, reason) = match pe_arch {
-            PeArchitecture::X86 => {
-                (WineArch::Win32, "32-bit PE binary; Wine prefix must be Win32.")
-            },
-            PeArchitecture::X86_64 => {
-                (WineArch::Win64, "64-bit PE binary; Win64 prefix for native 64-bit support.")
-            },
-        };
+    pub fn select_prefix_arch(_pe_arch: PeArchitecture) -> (WineArch, ResolutionDecision) {
+        let (arch, reason) = (
+            WineArch::Win64,
+            "Win64 prefix selected; 32-bit binaries run via WoW64. Win32 prefixes are unsupported on wow64-only Wine.",
+        );
         (
             arch,
             ResolutionDecision {
@@ -927,9 +923,9 @@ mod tests {
     // --- prefix arch ---
 
     #[test]
-    fn x86_selects_win32() {
+    fn x86_selects_win64() {
         let (arch, _) = DecisionEngine::select_prefix_arch(PeArchitecture::X86);
-        assert_eq!(arch, WineArch::Win32);
+        assert_eq!(arch, WineArch::Win64);
     }
 
     #[test]

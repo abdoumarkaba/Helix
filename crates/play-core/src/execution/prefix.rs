@@ -285,17 +285,38 @@ impl PrefixModule {
             );
         }
 
-        // Run wineboot to initialize the prefix (using pfx/ as WINEPREFIX)
-        let output =
-            self.run_wine_with_env(&pfx_path, &["wineboot", "--init"], &[("WINEARCH", arch_str)])?;
-
-        tracing::debug!(
-            event = "wineboot_completed",
-            output = %output.trim(),
-            "Wine prefix initialized"
-        );
-
-        Ok(())
+        // Run wineboot to initialize the prefix (using pfx/ as WINEPREFIX).
+        // Modern (wow64-only) Wine rejects WINEARCH=win32; fall back to win64,
+        // which can still run 32-bit binaries via WoW64.
+        let primary = arch_str;
+        let result = self.run_wine_with_env(&pfx_path, &["wineboot", "--init"], &[("WINEARCH", primary)]);
+        match result {
+            Ok(output) => {
+                tracing::debug!(
+                    event = "wineboot_completed",
+                    output = %output.trim(),
+                    "Wine prefix initialized"
+                );
+                Ok(())
+            },
+            Err(e) if primary == "win32" && (e.to_string().contains("wow64") || e.to_string().contains("not supported")) => {
+                tracing::warn!(
+                    "wineboot with WINEARCH=win32 failed on wow64-only Wine; retrying with WINEARCH=win64"
+                );
+                let output = self.run_wine_with_env(
+                    &pfx_path,
+                    &["wineboot", "--init"],
+                    &[("WINEARCH", "win64")],
+                )?;
+                tracing::debug!(
+                    event = "wineboot_completed",
+                    output = %output.trim(),
+                    "Wine prefix initialized"
+                );
+                Ok(())
+            },
+            Err(e) => Err(e),
+        }
     }
 
     /// Set the Windows version in the prefix registry.
