@@ -43,7 +43,7 @@ Add --detect-only CLI flag to helix binary, create test fixtures directory, upda
 ## Remaining Work Items
 
 ### 1. Add --detect-only CLI Flag
-**Status:** CI references non-existent play-detect-only binary  
+**Status:** ✅ Completed - flag implemented and tested  
 **Impact:** CI workflow integration detection smoke test fails  
 **Action:** 
 - Add `--detect-only` flag to helix CLI in play-cli/src/main.rs
@@ -53,7 +53,7 @@ Add --detect-only CLI flag to helix binary, create test fixtures directory, upda
 - Update CI workflow to use: `cargo run --bin helix -- --detect-only`
 
 ### 2. Test Fixtures Directory
-**Status:** Missing (`tests/fixtures/` directory doesn't exist)  
+**Status:** ✅ Completed - directory + README + generator present  
 **Impact:** Binary analysis tests rely on PE fixtures  
 **Action:** 
 - Create `tests/fixtures/binaries/` directory
@@ -68,14 +68,14 @@ Add --detect-only CLI flag to helix binary, create test fixtures directory, upda
 - Document fixture creation process
 
 ### 3. CI Workflow Update
-**Status:** References non-existent play-detect-only binary  
+**Status:** ✅ Completed - uses helix --detect-only  
 **Impact:** CI smoke test integration  
 **Action:** 
 - Update ci.yml line 37 from `cargo run --bin play-detect-only` to `cargo run --bin helix -- --detect-only`
 - Verify the command syntax is correct
 
 ### 4. Documentation Updates
-**Status:** CLAUDE.md needs update  
+**Status:** ✅ Completed - CLAUDE.md refreshed  
 **Impact:** Current status tracking  
 **Action:** Update CLAUDE.md "Current Status" section to reflect completed work
 
@@ -133,16 +133,16 @@ Add --detect-only CLI flag to helix binary, create test fixtures directory, upda
 
 ## Verification Checklist
 
-- [ ] --detect-only flag added to helix CLI
-- [ ] --detect-only outputs hardware detection results
-- [ ] Test fixtures directory structure created
-- [ ] CI workflow uses helix --detect-only
-- [ ] CLAUDE.md status is accurate
+- [x] --detect-only flag added to helix CLI
+- [x] --detect-only outputs hardware detection results
+- [x] Test fixtures directory structure created
+- [x] CI workflow uses helix --detect-only
+- [x] CLAUDE.md status is accurate
 - [ ] All tests pass (161+ tests)
 - [ ] `cargo fmt --check` passes
 - [ ] `cargo clippy -- -D warnings` passes
 - [ ] `cargo build --workspace --release` succeeds
-- [ ] `cargo run --bin helix -- --detect-only` works locally
+- [x] `cargo run --bin helix -- --detect-only` works locally
 
 ---
 
