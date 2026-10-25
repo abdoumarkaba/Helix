@@ -324,6 +324,7 @@ pub struct RunnerConfig {
 pub enum RunnerType {
     ProtonOfficial,
     ProtonGE,
+    ProtonCachyOS,
     WineGE,
     WineStaging,
     SodaWine,

@@ -82,7 +82,7 @@ impl LaunchModule {
 
         // Build command based on runner type
         let mut cmd = match runner_type {
-            RunnerType::ProtonOfficial | RunnerType::ProtonGE => {
+            RunnerType::ProtonOfficial | RunnerType::ProtonGE | RunnerType::ProtonCachyOS => {
                 // Proton: proton run <exe> [args]
                 let mut cmd = Command::new(runner_path);
                 cmd.arg("run").arg(exe_path);

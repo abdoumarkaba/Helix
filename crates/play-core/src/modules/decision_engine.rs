@@ -162,8 +162,19 @@ impl DecisionEngine {
         manifest: &RunnersManifest,
         identity: &GameIdentity,
     ) -> Result<(RunnerType, Version, ResolutionDecision), PlayError> {
-        // Always use ProtonGE as default (broadest compatibility)
-        let runner_type = RunnerType::ProtonGE;
+        // Default to Proton CachyOS 11 when available in the manifest — more
+        // reliable on this system than GE-Proton. Fall back to ProtonGE for
+        // manifests that only provide GE-Proton releases.
+        let cachy_candidates: Vec<&crate::models::plan::RunnerRelease> = manifest
+            .runners
+            .iter()
+            .filter(|r| r.runner_type == RunnerType::ProtonCachyOS)
+            .collect();
+        let runner_type = if cachy_candidates.is_empty() {
+            RunnerType::ProtonGE
+        } else {
+            RunnerType::ProtonCachyOS
+        };
 
         let version_floor: Option<Version> = None;
 
@@ -357,22 +368,88 @@ impl DecisionEngine {
             ];
 
             for compat_dir in steam_compat_paths {
-                if compat_dir.exists() {
-                    // Look for GE-Proton directory matching version
-                    // Version format: 10.34.0 -> directory name: GE-Proton10-34
-                    let version_str = version.to_string();
-                    let parts: Vec<&str> = version_str.split('.').collect();
-                    if parts.len() >= 2 {
-                        let proton_dir_name = format!("GE-Proton{}-{}", parts[0], parts[1]);
-                        let proton_path = compat_dir.join(&proton_dir_name).join("proton");
-                        if proton_path.exists() {
-                            tracing::info!(
-                                event = "runner_found_in_steam",
-                                path = %proton_path.display(),
-                                "Found runner in Steam compatibility tools directory"
-                            );
-                            return Ok(RunnerAction::AlreadyInstalled { path: proton_path });
+                if !compat_dir.exists() {
+                    continue;
+                }
+
+                // Version components used for directory matching.
+                let version_str = version.to_string();
+                let parts: Vec<&str> = version_str.split('.').collect();
+                let (major, minor) = if parts.len() >= 2 {
+                    (parts[0], parts[1])
+                } else {
+                    ("", "")
+                };
+
+                // Scan installed Steam compatibility tools for a matching runner.
+                // - ProtonGE:        GE-Proton{major}-{minor}
+                // - ProtonCachyOS:   proton-cachyos-{major}.{minor}*
+                if let Ok(entries) = std::fs::read_dir(&compat_dir) {
+                    // Collect candidate runner directories, prioritising an exact
+                    // type match (GE dirs for ProtonGE, cachy dirs for
+                    // ProtonCachyOS) over the ProtonGE -> cachy fallback.
+                    let mut candidates: Vec<(bool, std::path::PathBuf)> = Vec::new();
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if !path.is_dir() {
+                            continue;
                         }
+                        let name = entry.file_name();
+                        let name_lower = name.to_string_lossy().to_lowercase();
+
+                        let is_ge = name_lower.starts_with("ge-proton")
+                            || name_lower.starts_with("ge_proton");
+                        let is_cachy = name_lower.contains("cachy")
+                            && name_lower.contains("proton");
+
+                        let exact = match runner_type {
+                            RunnerType::ProtonGE => is_ge,
+                            RunnerType::ProtonCachyOS => is_cachy,
+                            _ => false,
+                        };
+                        let fallback = runner_type == RunnerType::ProtonGE && is_cachy;
+
+                        if !(exact || fallback) {
+                            continue;
+                        }
+
+                        // Require the directory name to reference the resolved version.
+                        if !major.is_empty()
+                            && !minor.is_empty()
+                            && !name_lower.contains(&format!("{}.{}", major, minor).to_lowercase())
+                        {
+                            continue;
+                        }
+
+                        let proton_path = path.join("proton");
+                        if proton_path.exists() {
+                            candidates.push((exact, proton_path));
+                        }
+                    }
+
+                    // Exact type matches first.
+                    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+                    if let Some((_, proton_path)) = candidates.into_iter().next() {
+                        tracing::info!(
+                            event = "runner_found_in_steam",
+                            path = %proton_path.display(),
+                            "Found runner in Steam compatibility tools directory"
+                        );
+                        return Ok(RunnerAction::AlreadyInstalled { path: proton_path });
+                    }
+                }
+
+                // Legacy fallback for ProtonGE directory naming.
+                if runner_type == RunnerType::ProtonGE && parts.len() >= 2 {
+                    let proton_dir_name = format!("GE-Proton{}-{}", parts[0], parts[1]);
+                    let proton_path = compat_dir.join(&proton_dir_name).join("proton");
+                    if proton_path.exists() {
+                        tracing::info!(
+                            event = "runner_found_in_steam",
+                            path = %proton_path.display(),
+                            "Found runner in Steam compatibility tools directory"
+                        );
+                        return Ok(RunnerAction::AlreadyInstalled { path: proton_path });
                     }
                 }
             }

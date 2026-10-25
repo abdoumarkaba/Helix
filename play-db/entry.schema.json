@@ -13,7 +13,7 @@
     },
     "runner_type_override": {
       "type": "string",
-      "enum": ["ProtonGE", "WineGE", "ProtonOfficial", "WineStaging", "SodaWine"],
+      "enum": ["ProtonGE", "ProtonCachyOS", "WineGE", "ProtonOfficial", "WineStaging", "SodaWine"],
       "description": "Override default runner type selection"
     },
     "windows_version_override": {

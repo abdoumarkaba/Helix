@@ -103,7 +103,7 @@ fn base_env(dx: DirectXVersion, pe_arch: PeArchitecture) -> GameEnvironment {
             gamemode: false,
         },
         runner: RunnerConfig {
-            runner_type: RunnerType::ProtonGE,
+            runner_type: RunnerType::ProtonCachyOS,
             version: semver::Version::new(0, 0, 0),
             install_path: PathBuf::from("/tmp"),
             verified: false,
@@ -166,7 +166,7 @@ fn full_plan_d3d9_pipewire_nvidia_laptop() {
 
     assert!(plan.hard_blocks.is_empty(), "unexpected hard blocks: {:?}", plan.hard_blocks);
     assert_eq!(plan.env.graphics.translation_layer, TranslationLayer::Dxvk);
-    assert_eq!(plan.env.runner.runner_type, RunnerType::ProtonGE);
+    assert_eq!(plan.env.runner.runner_type, RunnerType::ProtonCachyOS);
     assert!(plan.env.system.fsync, "fsync should be set on futex2 kernel");
     assert!(!plan.env.system.esync, "esync should not be set when fsync is active");
     assert!(!plan.env.metadata.decisions.is_empty(), "decisions must be recorded");

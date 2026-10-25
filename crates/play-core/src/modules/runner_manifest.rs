@@ -16,10 +16,10 @@ pub fn get_default_manifest() -> RunnersManifest {
     RunnersManifest {
         runners: vec![
             RunnerRelease {
-                runner_type: RunnerType::ProtonGE,
-                version: semver::Version::new(10, 34, 0),
-                url: "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton10-34/GE-Proton10-34.tar.gz".to_string(),
-                sha512: "PLACEHOLDER_GE_PROTON_10_34_SHA512".to_string(),
+                runner_type: RunnerType::ProtonCachyOS,
+                version: semver::Version::new(11, 0, 0),
+                url: "https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-11.0-20260429-slr/proton-cachyos-11.0-20260429-slr-x86_64.tar.gz".to_string(),
+                sha512: "PLACEHOLDER_PROTON_CACHYOS_11_0_SHA512".to_string(),
             },
             RunnerRelease {
                 runner_type: RunnerType::ProtonGE,

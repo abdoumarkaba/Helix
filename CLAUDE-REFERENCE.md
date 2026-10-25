@@ -98,7 +98,7 @@ pub struct TweakConstraint {
 
 // Key enums (use these, never string comparisons):
 enum DirectXVersion { D3D8, D3D9, D3D10, D3D11, D3D12, Vulkan, OpenGL, Unknown }
-enum RunnerType { ProtonGE, WineGE, ProtonOfficial, WineStaging }
+enum RunnerType { ProtonOfficial, ProtonGE, ProtonCachyOS, WineGE, WineStaging, SodaWine }
 enum TranslationLayer { Dxvk, Vkd3dProton, WineOpenGL, Native }
 enum GpuVendor { NVIDIA, AMD, Intel }
 enum AntiCheat { EasyAntiCheat { linux_supported: bool }, BattlEye { linux_supported: bool },
@@ -111,7 +111,7 @@ AntiCheat::EasyAntiCheat { linux_supported: false } → hard fail, PlayError::An
 D3D12 → TranslationLayer::Vkd3dProton
 D3D9/10/11/8 → TranslationLayer::Dxvk
 Denuvo or EAC(linux_supported: true) → DxvkConfig.async_compile = false
-Default runner: RunnerType::ProtonGE (always; GE is the safer default)
+Default runner: ProtonCachyOS 11 (ProtonCachyOS variant) when available, otherwise ProtonGE
 Version: query play-db for version_min, then select LATEST stable above floor from runners.toml
 NEVER hardcode a version string like "9.10". NEVER.
 

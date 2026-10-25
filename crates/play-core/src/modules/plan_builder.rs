@@ -255,7 +255,8 @@ impl<'a> PlanBuilder<'a> {
         let prefix_path = env.prefix.path.clone();
         match runner_type {
             crate::models::environment::RunnerType::ProtonGE
-            | crate::models::environment::RunnerType::ProtonOfficial => {
+            | crate::models::environment::RunnerType::ProtonOfficial
+            | crate::models::environment::RunnerType::ProtonCachyOS => {
                 // Proton uses STEAM_COMPAT_DATA_PATH for the prefix
                 env.launch.env.insert(
                     "STEAM_COMPAT_DATA_PATH".to_owned(),

@@ -1064,7 +1064,7 @@ impl Orchestrator {
         };
 
         let runner = RunnerConfig {
-            runner_type: crate::models::environment::RunnerType::ProtonGE,
+            runner_type: crate::models::environment::RunnerType::ProtonCachyOS,
             version: Version::new(0, 0, 0),
             install_path: PathBuf::new(),
             verified: false,
@@ -1437,7 +1437,7 @@ mod tests {
                     gamemode: false,
                 },
                 runner: crate::models::environment::RunnerConfig {
-                    runner_type: crate::models::environment::RunnerType::ProtonGE,
+                    runner_type: crate::models::environment::RunnerType::ProtonCachyOS,
                     version: semver::Version::new(0, 0, 0),
                     install_path: PathBuf::new(),
                     verified: false,

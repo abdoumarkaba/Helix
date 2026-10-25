@@ -3,11 +3,11 @@
 # To get real checksum: curl -sL <release_url>/<file>.sha512sum | cut -d' ' -f1
 
 [[runners]]
-runner_type = "ProtonGE"
-version = "10.34.0"
-url = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton10-34/GE-Proton10-34.tar.gz"
+runner_type = "ProtonCachyOS"
+version = "11.0.0"
+url = "https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-11.0-20260429-slr/proton-cachyos-11.0-20260429-slr-x86_64.tar.gz"
 # TODO: Replace with actual SHA512 from release
-sha512 = "PLACEHOLDER_GE_PROTON_10_34_SHA512"
+sha512 = "PLACEHOLDER_PROTON_CACHYOS_11_0_SHA512"
 
 [[runners]]
 runner_type = "ProtonGE"

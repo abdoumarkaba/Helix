@@ -6,12 +6,12 @@
 # To get real checksum: curl -sL <release_url>/<file>.sha512sum | cut -d' ' -f1
 
 [[runners]]
-runner_type = "ProtonGE"
-version = "10.34.0"
-url = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton10-34/GE-Proton10-34.tar.gz"
-sha512 = "PLACEHOLDER_GE_PROTON_10_34_SHA512"
-released = "2026-03-23"
-notes = "Latest GE-Proton - best for modern games. FSR4/DLSS support, Wayland improvements."
+runner_type = "ProtonCachyOS"
+version = "11.0.0"
+url = "https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-11.0-20260429-slr/proton-cachyos-11.0-20260429-slr-x86_64.tar.gz"
+sha512 = "PLACEHOLDER_PROTON_CACHYOS_11_0_SHA512"
+released = "2026-04-29"
+notes = "Proton CachyOS 11 - more reliable default runner."
 
 [[runners]]
 runner_type = "ProtonGE"
