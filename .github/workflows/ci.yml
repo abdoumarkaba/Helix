@@ -34,4 +34,4 @@ jobs:
       - name: Unit tests
         run: ~/.cargo/bin/cargo test --all
       - name: Integration detection smoke test
-        run: ~/.cargo/bin/cargo run --bin play-detect-only
+        run: ~/.cargo/bin/cargo run --bin helix -- --detect-only

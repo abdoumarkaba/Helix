@@ -91,8 +91,10 @@ impl GovernorGuard {
                     // Manual rollback of already-written cores (can't clone Box<dyn CommandRunner>)
                     for (prev_path, prev_val) in cores.iter().rev() {
                         let prev_path_str = prev_path.to_string_lossy();
-                        let _ = cmd_runner
-                            .run_command("helix-helper", &["sysfs-write", &prev_path_str, prev_val]);
+                        let _ = cmd_runner.run_command(
+                            "helix-helper",
+                            &["sysfs-write", &prev_path_str, prev_val],
+                        );
                     }
                     PlayError::GovernorWrite {
                         core: path.display().to_string(),

@@ -169,7 +169,9 @@ impl SystemModule {
             Err(e) => {
                 // Log warning but don't fail - allows testing without helix-helper privileges
                 tracing::warn!("Batched system tweaks failed (requires elevated helper): {}", e);
-                tracing::warn!("Skipping system tweaks - game may still work but with suboptimal performance");
+                tracing::warn!(
+                    "Skipping system tweaks - game may still work but with suboptimal performance"
+                );
                 Ok(())
             },
         }

@@ -74,6 +74,10 @@ struct CliArgs {
     /// Review MangoHud logs from previous game runs
     #[arg(long)]
     review_mangohud: bool,
+
+    /// Run hardware detection only and exit (no planning or execution)
+    #[arg(long)]
+    detect_only: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -651,6 +655,31 @@ fn create_orchestrator(
 
 fn main() {
     let args = CliArgs::parse();
+
+    // --detect-only: run hardware detection only, output JSON, exit
+    if args.detect_only {
+        let cmd_runner = Box::new(play_core::modules::detection::RealCommandRunner);
+        match play_core::modules::detection::detect_hardware(
+            std::path::Path::new("/proc"),
+            std::path::Path::new("/sys"),
+            std::path::Path::new("/etc"),
+            cmd_runner.as_ref(),
+            std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+            std::env::var("DISPLAY").ok().as_deref(),
+        ) {
+            Ok(result) => {
+                match serde_json::to_string_pretty(&result.hw) {
+                    Ok(json) => println!("{}", json),
+                    Err(e) => eprintln!("Failed to serialize detection result: {}", e),
+                }
+                std::process::exit(0);
+            },
+            Err(e) => {
+                eprintln!("Detection failed: {}", e);
+                std::process::exit(1);
+            },
+        }
+    }
 
     // Handle utility commands that don't need an exe_path (before setting up tracing)
     if args.log_path {

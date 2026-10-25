@@ -75,18 +75,20 @@ Modules communicate **only** via typed GameEnvironment. No direct calls between 
 - `crates/play-core/src/models/errors.rs` — all PlayError variants with thiserror messages
 - `crates/play-core/src/binary/pe.rs` — analyze_binary() with 17+ passing tests
 - `crates/play-db-tools/` — stub crate created to satisfy workspace
+- `--detect-only` flag added to helix CLI (hardware-only detection, JSON output)
 
 ### Before First Commit (in progress)
-- [ ] `DESIGN.md` — Plan→Confirm→Execute, module contracts, error philosophy
+- [x] `DESIGN.md` — Plan→Confirm→Execute, module contracts, error philosophy
+- [x] Workspace `Cargo.toml` (four crates: `play-cli`, `play-core`, `play-helper`, `play-db-tools`)
+- [x] `.cargo/config.toml` with `-D warnings`
+- [x] `rustfmt.toml`
+- [x] `.github/workflows/ci.yml` (fmt + clippy + test on PR; detect-only smoke test)
+- [x] `.github/workflows/cross-distro.yml` (Ubuntu/Fedora/Arch matrix)
+- [x] `tests/fixtures/binaries/` — fixture directory + README (builder in crates/play-core)
 - [ ] `GPL-3.0` LICENSE file
-- [ ] Workspace `Cargo.toml` (three crates: `play`, `play-helper`, `play-db-tools`)
-- [ ] `.cargo/config.toml` with `-D warnings`
-- [ ] `rustfmt.toml`
-- [ ] `.github/workflows/ci.yml` (fmt + clippy + test on PR)
-- [ ] `.github/workflows/cross-distro.yml` (Ubuntu/Fedora/Arch matrix)
-- [ ] `tests/fixtures/binaries/` — minimal PE fixtures (d3d9, d3d11, d3d12, vulkan, eac, bink, no_imports)
 - [ ] `CONTRIBUTING.md`
 - [ ] `play-db` repository scaffold
+- [ ] `--detect-only` CLI flag (implemented)
 
 ### Not Yet Started
 - PlanningModule (TweakRegistry, DecisionEngine, PlanBuilder)

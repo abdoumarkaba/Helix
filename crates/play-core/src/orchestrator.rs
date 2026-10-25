@@ -995,14 +995,14 @@ impl Orchestrator {
                     "Never" => "never",
                     other => other,
                 };
-                self.cmd_runner.run_command("helix-helper", &["sysfs-write", path, value]).map_err(
-                    |e| PlayError::RollbackFailed {
+                self.cmd_runner
+                    .run_command("helix-helper", &["sysfs-write", path, value])
+                    .map_err(|e| PlayError::RollbackFailed {
                         key: entry.key.clone(),
                         reason: e,
                         previous_value: entry.previous_value.clone(),
                         path: PathBuf::from(path),
-                    },
-                )?;
+                    })?;
             },
             RestoreMethod::FileWrite { path } => {
                 self.cmd_runner

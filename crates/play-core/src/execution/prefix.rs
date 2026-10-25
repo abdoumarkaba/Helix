@@ -136,7 +136,8 @@ impl PrefixModule {
     pub fn execute(&self, action: &PrefixAction) -> Result<PathBuf, PlayError> {
         match action {
             PrefixAction::AlreadyExists { path } => {
-                let wine_prefix = if path.join("pfx").exists() { path.join("pfx") } else { path.clone() };
+                let wine_prefix =
+                    if path.join("pfx").exists() { path.join("pfx") } else { path.clone() };
                 tracing::info!(
                     event = "prefix_already_exists",
                     path = %wine_prefix.display(),
@@ -300,7 +301,8 @@ impl PrefixModule {
         // Modern (wow64-only) Wine rejects WINEARCH=win32; fall back to win64,
         // which can still run 32-bit binaries via WoW64.
         let primary = arch_str;
-        let result = self.run_wine_with_env(&pfx_path, &["wineboot", "--init"], &[("WINEARCH", primary)]);
+        let result =
+            self.run_wine_with_env(&pfx_path, &["wineboot", "--init"], &[("WINEARCH", primary)]);
         match result {
             Ok(output) => {
                 tracing::debug!(
@@ -310,7 +312,11 @@ impl PrefixModule {
                 );
                 Ok(())
             },
-            Err(e) if primary == "win32" && (e.to_string().contains("wow64") || e.to_string().contains("not supported")) => {
+            Err(e)
+                if primary == "win32"
+                    && (e.to_string().contains("wow64")
+                        || e.to_string().contains("not supported")) =>
+            {
                 tracing::warn!(
                     "wineboot with WINEARCH=win32 failed on wow64-only Wine; retrying with WINEARCH=win64"
                 );
