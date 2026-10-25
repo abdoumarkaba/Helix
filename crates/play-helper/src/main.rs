@@ -1,0 +1,210 @@
+use serde::{Deserialize, Serialize};
+use std::env;
+use std::fs;
+use std::process::ExitCode;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+enum BatchedTweakCommand {
+    #[serde(rename = "sysctl_write")]
+    SysctlWrite(String, String),
+    #[serde(rename = "sysfs_write")]
+    SysfsWrite(String, String),
+    #[serde(rename = "ulimit_nofile")]
+    UlimitNofile(u64),
+}
+
+/// Whitelist of allowed sysfs paths for security.
+/// Only these paths can be written to via helix-helper.
+const SYSFS_WHITELIST: &[&str] = &[
+    // Transparent Huge Pages configuration
+    "/sys/kernel/mm/transparent_hugepage/enabled",
+    "/sys/kernel/mm/transparent_hugepage/defrag",
+    // GPU power management (NVIDIA)
+    "/sys/bus/pci/drivers/nvidia/bind",
+    "/sys/bus/pci/drivers/nvidia/unbind",
+    // CPU governor (handled via files in /sys/devices/system/cpu/)
+    // Note: These are typically per-CPU, so we allow the pattern
+];
+
+/// Whitelist of allowed sysctl keys for security.
+/// Only these keys can be written to via helix-helper.
+const SYSCTL_WHITELIST: &[&str] = &[
+    "vm.max_map_count",
+    "kernel.sched_autogroup",
+    "kernel.split_lock_mitigate",
+    "fs.file-max",
+    "vm.swappiness",
+    "vm.dirty_ratio",
+    "vm.dirty_background_ratio",
+];
+
+/// Whitelist of allowed file paths for write-file command.
+const FILE_WHITELIST: &[&str] = &["/etc/security/limits.d/play.conf"];
+
+fn main() -> ExitCode {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        eprintln!("Usage: helix-helper <subcommand> [args...]");
+        eprintln!("Subcommands:");
+        eprintln!("  sysctl-write <key> <value>   - Write to /proc/sys/<key>");
+        eprintln!("  sysfs-write <path> <value>   - Write to /sys/<path>");
+        eprintln!("  write-file <path> <content>  - Write content to file");
+        eprintln!("  batch <json>                 - Execute batched commands from JSON");
+        return ExitCode::FAILURE;
+    }
+
+    match args[1].as_str() {
+        "sysctl-write" => {
+            if args.len() != 4 {
+                eprintln!("Usage: helix-helper sysctl-write <key> <value>");
+                return ExitCode::FAILURE;
+            }
+            let key = &args[2];
+            let value = &args[3];
+            sysctl_write(key, value)
+        },
+        "sysfs-write" => {
+            if args.len() != 4 {
+                eprintln!("Usage: helix-helper sysfs-write <path> <value>");
+                return ExitCode::FAILURE;
+            }
+            let path = &args[2];
+            let value = &args[3];
+            sysfs_write(path, value)
+        },
+        "write-file" => {
+            if args.len() != 4 {
+                eprintln!("Usage: helix-helper write-file <path> <content>");
+                return ExitCode::FAILURE;
+            }
+            let path = &args[2];
+            let content = &args[3];
+            write_file(path, content)
+        },
+        "batch" => {
+            if args.len() != 3 {
+                eprintln!("Usage: helix-helper batch <json>");
+                return ExitCode::FAILURE;
+            }
+            let json = &args[2];
+            batch_execute(json)
+        },
+        _ => {
+            eprintln!("Unknown subcommand: {}", args[1]);
+            return ExitCode::FAILURE;
+        },
+    }
+}
+
+fn sysctl_write(key: &str, value: &str) -> ExitCode {
+    // Security check: only allow whitelisted keys
+    if !SYSCTL_WHITELIST.contains(&key) {
+        eprintln!("Error: sysctl key '{}' is not in the whitelist", key);
+        eprintln!("Allowed keys: {:?}", SYSCTL_WHITELIST);
+        return ExitCode::FAILURE;
+    }
+
+    // Convert "vm.max_map_count" to "/proc/sys/vm/max_map_count"
+    let path = format!("/proc/sys/{}", key.replace('.', "/"));
+    write_to_file(&path, value)
+}
+
+fn sysfs_write(path: &str, value: &str) -> ExitCode {
+    // Ensure path starts with /sys/
+    let full_path = if path.starts_with("/sys/") {
+        path.to_string()
+    } else {
+        format!("/sys/{}", path.trim_start_matches('/'))
+    };
+
+    // Security check: only allow whitelisted paths (or CPU governor patterns)
+    let is_allowed =
+        SYSFS_WHITELIST.contains(&full_path.as_str()) || is_cpu_governor_path(&full_path);
+
+    if !is_allowed {
+        eprintln!("Error: sysfs path '{}' is not in the whitelist", full_path);
+        eprintln!("Allowed paths: {:?}", SYSFS_WHITELIST);
+        return ExitCode::FAILURE;
+    }
+
+    write_to_file(&full_path, value)
+}
+
+/// Check if path is a CPU governor path (allowed pattern for per-CPU control).
+/// Format: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+fn is_cpu_governor_path(path: &str) -> bool {
+    path.contains("/sys/devices/system/cpu/") && path.contains("/cpufreq/scaling_governor")
+}
+
+fn write_file(path: &str, content: &str) -> ExitCode {
+    // Security check: only allow whitelisted paths
+    if !FILE_WHITELIST.contains(&path) {
+        eprintln!("Error: file path '{}' is not in the whitelist", path);
+        eprintln!("Allowed paths: {:?}", FILE_WHITELIST);
+        return ExitCode::FAILURE;
+    }
+
+    write_to_file(path, content)
+}
+
+fn write_to_file(path: &str, content: &str) -> ExitCode {
+    if let Err(e) = fs::write(path, content) {
+        eprintln!("Failed to write to {}: {}", path, e);
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
+fn batch_execute(json: &str) -> ExitCode {
+    let commands: Vec<BatchedTweakCommand> = match serde_json::from_str(json) {
+        Ok(cmds) => cmds,
+        Err(e) => {
+            eprintln!("Failed to parse batch JSON: {}", e);
+            return ExitCode::FAILURE;
+        },
+    };
+
+    let mut failed = false;
+    for cmd in commands {
+        let result = match cmd {
+            BatchedTweakCommand::SysctlWrite(key, value) => sysctl_write(&key, &value),
+            BatchedTweakCommand::SysfsWrite(path, value) => sysfs_write(&path, &value),
+            BatchedTweakCommand::UlimitNofile(value) => {
+                let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
+                write_file("/etc/security/limits.d/play.conf", &content)
+            },
+        };
+        if result != ExitCode::SUCCESS {
+            failed = true;
+        }
+    }
+
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_batched_tweak_serialization() {
+        let commands = vec![
+            BatchedTweakCommand::SysctlWrite("vm.max_map_count".to_string(), "8388608".to_string()),
+            BatchedTweakCommand::SysfsWrite(
+                "/sys/kernel/mm/transparent_hugepage/enabled".to_string(),
+                "madvise".to_string(),
+            ),
+        ];
+
+        let json = serde_json::to_string(&commands).unwrap();
+        let parsed: Vec<BatchedTweakCommand> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.len(), 2);
+    }
+}

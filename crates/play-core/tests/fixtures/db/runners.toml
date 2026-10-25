@@ -1,0 +1,31 @@
+# GE-Proton runners from https://github.com/GloriousEggroll/proton-ge-custom/releases
+# SHA512 checksums are in the .sha512sum files attached to each release
+# To get real checksum: curl -sL <release_url>/<file>.sha512sum | cut -d' ' -f1
+
+[[runners]]
+runner_type = "ProtonCachyOS"
+version = "11.0.0"
+url = "https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-11.0-20260429-slr/proton-cachyos-11.0-20260429-slr-x86_64.tar.gz"
+# TODO: Replace with actual SHA512 from release
+sha512 = "PLACEHOLDER_PROTON_CACHYOS_11_0_SHA512"
+
+[[runners]]
+runner_type = "ProtonGE"
+version = "9.27.0"
+url = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton9-27/GE-Proton9-27.tar.gz"
+# TODO: Replace with actual SHA512 from release
+sha512 = "PLACEHOLDER_GE_PROTON_9_27_SHA512"
+
+[[runners]]
+runner_type = "ProtonGE"
+version = "9.20.0"
+url = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton9-20/GE-Proton9-20.tar.gz"
+# TODO: Replace with actual SHA512 from release
+sha512 = "PLACEHOLDER_GE_PROTON_9_20_SHA512"
+
+[[runners]]
+runner_type = "WineGE"
+version = "8.26.0"
+url = "https://github.com/GloriousEggroll/wine-ge-custom/releases/download/wine-ge-proton8-26/wine-ge-proton8-26.tar.gz"
+# TODO: Replace with actual SHA512 from release
+sha512 = "PLACEHOLDER_WINE_GE_8_26_SHA512"

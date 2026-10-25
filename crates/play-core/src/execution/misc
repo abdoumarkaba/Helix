@@ -1,0 +1,11 @@
+cargo build --release
+sudo cp target/release/helix /usr/local/bin/
+sudo cp target/release/helix-helper /usr/local/bin/
+sudo cp com.github.abdoumarkt.play.policy /usr/share/polkit-1/actions/
+helix "/run/media/abdoufoundit/forgames/gamesiactuallywannatry/A Short Hike/AShortHike.exe"
+
+
+ISSUES: 
+ensure appropriate permission
+unncecessary rollback of kernel tweaks on permission failure, we still need those values
+

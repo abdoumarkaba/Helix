@@ -1,0 +1,38 @@
+# runners.toml - Runner version manifest for play
+# Updated by maintainers when new GE-Proton releases are available
+# Play NEVER fetches runner metadata from the internet at game launch time
+#
+# SHA512 checksums are in the .sha512sum files attached to each release
+# To get real checksum: curl -sL <release_url>/<file>.sha512sum | cut -d' ' -f1
+
+[[runners]]
+runner_type = "ProtonCachyOS"
+version = "11.0.0"
+url = "https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-11.0-20260429-slr/proton-cachyos-11.0-20260429-slr-x86_64.tar.gz"
+sha512 = "PLACEHOLDER_PROTON_CACHYOS_11_0_SHA512"
+released = "2026-04-29"
+notes = "Proton CachyOS 11 - more reliable default runner."
+
+[[runners]]
+runner_type = "ProtonGE"
+version = "9.27.0"
+url = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton9-27/GE-Proton9-27.tar.gz"
+sha512 = "PLACEHOLDER_GE_PROTON_9_27_SHA512"
+released = "2025-04-01"
+notes = "Fixes for Ubisoft Connect, Epic Games, Monster Hunter Wilds"
+
+[[runners]]
+runner_type = "ProtonGE"
+version = "9.20.0"
+url = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton9-20/GE-Proton9-20.tar.gz"
+sha512 = "PLACEHOLDER_GE_PROTON_9_20_SHA512"
+released = "2024-11-10"
+notes = "Hotfix for Diablo IV grey screen on AMD iGPU+dGPU systems"
+
+[[runners]]
+runner_type = "WineGE"
+version = "8.26.0"
+url = "https://github.com/GloriousEggroll/wine-ge-custom/releases/download/wine-ge-proton8-26/wine-ge-proton8-26.tar.gz"
+sha512 = "PLACEHOLDER_WINE_GE_8_26_SHA512"
+released = "2024-12-01"
+notes = "32-bit fallback for older games (Wine-GE is deprecated, use Proton-GE with umu instead)"

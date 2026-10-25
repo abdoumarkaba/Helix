@@ -1,0 +1,13 @@
+# Example play-db entry for a known-working game
+# This is a template - replace with actual game data
+
+runner_version_min = "9.20.0"
+windows_version_override = "Win10"
+notes = "Example entry for integration tests. Replace with actual game data."
+
+[[dll_overrides]]
+dll = "d3d9"
+mode = "native,builtin"
+
+[extra_env_vars]
+DXVK_STATE_CACHE_PATH = "~/.local/share/play/cache/dxvk"
