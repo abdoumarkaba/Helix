@@ -136,8 +136,18 @@ impl PrefixModule {
     pub fn execute(&self, action: &PrefixAction) -> Result<PathBuf, PlayError> {
         match action {
             PrefixAction::AlreadyExists { path } => {
-                let wine_prefix =
-                    if path.join("pfx").exists() { path.join("pfx") } else { path.clone() };
+                // Determine the actual Wine prefix location by checking for
+                // `system.reg`: prefer `pfx/` first, then the base path itself
+                // (plain-Wine / non-Proton runners store the prefix at `path`).
+                let wine_prefix = if path.join("pfx").join("system.reg").exists() {
+                    path.join("pfx")
+                } else if path.join("system.reg").exists() {
+                    path.clone()
+                } else if path.join("pfx").exists() {
+                    path.join("pfx")
+                } else {
+                    path.clone()
+                };
                 tracing::info!(
                     event = "prefix_already_exists",
                     path = %wine_prefix.display(),

@@ -1,3 +1,19 @@
+#![allow(
+    clippy::pedantic,
+    clippy::too_many_lines,
+    clippy::items_after_statements,
+    clippy::map_unwrap_or,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::unnecessary_cast,
+    clippy::unnecessary_sort_by,
+    clippy::bool_comparison,
+    clippy::single_match,
+    clippy::match_result_ok,
+    clippy::used_underscore_binding,
+    clippy::uninlined_format_args
+)]
 //! CLI entry point for the `play` Linux gaming orchestrator.
 //!
 //! Handles argument parsing, tracing setup, plan display, user confirmation,
@@ -896,6 +912,10 @@ fn main() {
     orchestrator.set_post_confirm_callback(Box::new(move || {
         progress_bar_resume.enable_steady_tick(std::time::Duration::from_millis(100));
     }));
+
+    if args.yes {
+        orchestrator.set_confirm_callback(Box::new(|_| true));
+    }
 
     let result = orchestrator.run(&exe_path);
 

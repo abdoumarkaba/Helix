@@ -562,7 +562,7 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
             .split('.')
             .next()
             .and_then(|s| s.parse::<u64>().ok())
-            .map(|major| Version::new(major as u64, 0, 0))
+            .map(|major| Version::new(major, 0, 0))
             .unwrap_or_else(|| Version::new(0, 0, 0));
 
         info!(vendor = "NVIDIA", model = %name, vram_mb, driver = %driver_str, method = "nvidia-smi", "gpu detection");

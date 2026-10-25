@@ -40,7 +40,7 @@ const SYSCTL_WHITELIST: &[&str] = &[
 ];
 
 /// Whitelist of allowed file paths for write-file command.
-const FILE_WHITELIST: &[&str] = &["/etc/security/limits.d/play.conf"];
+const FILE_WHITELIST: &[&str] = &["/etc/security/limits.d/helix.conf"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -93,7 +93,7 @@ fn main() -> ExitCode {
         },
         _ => {
             eprintln!("Unknown subcommand: {}", args[1]);
-            return ExitCode::FAILURE;
+            ExitCode::FAILURE
         },
     }
 }
@@ -101,8 +101,8 @@ fn main() -> ExitCode {
 fn sysctl_write(key: &str, value: &str) -> ExitCode {
     // Security check: only allow whitelisted keys
     if !SYSCTL_WHITELIST.contains(&key) {
-        eprintln!("Error: sysctl key '{}' is not in the whitelist", key);
-        eprintln!("Allowed keys: {:?}", SYSCTL_WHITELIST);
+        eprintln!("Error: sysctl key '{key}' is not in the whitelist");
+        eprintln!("Allowed keys: {SYSCTL_WHITELIST:?}");
         return ExitCode::FAILURE;
     }
 
@@ -124,8 +124,8 @@ fn sysfs_write(path: &str, value: &str) -> ExitCode {
         SYSFS_WHITELIST.contains(&full_path.as_str()) || is_cpu_governor_path(&full_path);
 
     if !is_allowed {
-        eprintln!("Error: sysfs path '{}' is not in the whitelist", full_path);
-        eprintln!("Allowed paths: {:?}", SYSFS_WHITELIST);
+        eprintln!("Error: sysfs path '{full_path}' is not in the whitelist");
+        eprintln!("Allowed paths: {SYSFS_WHITELIST:?}");
         return ExitCode::FAILURE;
     }
 
@@ -133,7 +133,7 @@ fn sysfs_write(path: &str, value: &str) -> ExitCode {
 }
 
 /// Check if path is a CPU governor path (allowed pattern for per-CPU control).
-/// Format: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+/// Format: `/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`
 fn is_cpu_governor_path(path: &str) -> bool {
     path.contains("/sys/devices/system/cpu/") && path.contains("/cpufreq/scaling_governor")
 }
@@ -141,8 +141,8 @@ fn is_cpu_governor_path(path: &str) -> bool {
 fn write_file(path: &str, content: &str) -> ExitCode {
     // Security check: only allow whitelisted paths
     if !FILE_WHITELIST.contains(&path) {
-        eprintln!("Error: file path '{}' is not in the whitelist", path);
-        eprintln!("Allowed paths: {:?}", FILE_WHITELIST);
+        eprintln!("Error: file path '{path}' is not in the whitelist");
+        eprintln!("Allowed paths: {FILE_WHITELIST:?}");
         return ExitCode::FAILURE;
     }
 
@@ -151,7 +151,7 @@ fn write_file(path: &str, content: &str) -> ExitCode {
 
 fn write_to_file(path: &str, content: &str) -> ExitCode {
     if let Err(e) = fs::write(path, content) {
-        eprintln!("Failed to write to {}: {}", path, e);
+        eprintln!("Failed to write to {path}: {e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
@@ -161,7 +161,7 @@ fn batch_execute(json: &str) -> ExitCode {
     let commands: Vec<BatchedTweakCommand> = match serde_json::from_str(json) {
         Ok(cmds) => cmds,
         Err(e) => {
-            eprintln!("Failed to parse batch JSON: {}", e);
+            eprintln!("Failed to parse batch JSON: {e}");
             return ExitCode::FAILURE;
         },
     };
@@ -173,7 +173,7 @@ fn batch_execute(json: &str) -> ExitCode {
             BatchedTweakCommand::SysfsWrite(path, value) => sysfs_write(&path, &value),
             BatchedTweakCommand::UlimitNofile(value) => {
                 let content = format!("* soft nofile {value}\n* hard nofile {value}\n");
-                write_file("/etc/security/limits.d/play.conf", &content)
+                write_file("/etc/security/limits.d/helix.conf", &content)
             },
         };
         if result != ExitCode::SUCCESS {

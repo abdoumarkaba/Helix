@@ -193,6 +193,8 @@ pub struct Orchestrator {
     running_game: Option<std::process::Child>,
     /// Progress callback for phase updates.
     progress_callback: Option<Box<dyn Fn(String) + Send>>,
+    /// The originating error of a failed run, if any.
+    last_error: Option<PlayError>,
 }
 
 impl Orchestrator {
@@ -262,6 +264,7 @@ impl Orchestrator {
             post_confirm_callback: None,
             running_game: None,
             progress_callback: None,
+            last_error: None,
         }
     }
 
@@ -295,6 +298,7 @@ impl Orchestrator {
             post_confirm_callback: None,
             running_game: None,
             progress_callback: None,
+            last_error: None,
         }
     }
 
@@ -418,12 +422,20 @@ impl Orchestrator {
 
         // Phase 1: Detection (skip if already detected from checkpoint)
         if self.phase < OrchestratorPhase::Detected {
-            self.detect(exe_path)?;
+            if let Err(e) = self.detect(exe_path) {
+                self.last_error = Some(e);
+                self.phase = OrchestratorPhase::Failed;
+                return self.final_error();
+            }
             if self.phase == OrchestratorPhase::Failed {
                 return self.final_error();
             }
             // After detection, rename state directory to use real SHA256
-            self.rename_state_to_hash()?;
+            if let Err(e) = self.rename_state_to_hash() {
+                self.last_error = Some(e);
+                self.phase = OrchestratorPhase::Failed;
+                return self.final_error();
+            }
         } else {
             info!(
                 event = "phase_skip",
@@ -434,7 +446,11 @@ impl Orchestrator {
 
         // Phase 2: Planning (skip if already planned from checkpoint)
         if self.phase < OrchestratorPhase::Planned {
-            self.plan_phase()?;
+            if let Err(e) = self.plan_phase() {
+                self.last_error = Some(e);
+                self.phase = OrchestratorPhase::Failed;
+                return self.final_error();
+            }
             if self.phase == OrchestratorPhase::Failed {
                 return self.final_error();
             }
@@ -448,7 +464,11 @@ impl Orchestrator {
                         "Planning found hard blocks, cannot proceed"
                     );
                     self.phase = OrchestratorPhase::Failed;
-                    self.write_checkpoint()?;
+                    self.last_error = Some(PlayError::OrchestratorFailed {
+                        phase: "planning".to_string(),
+                        reason: plan.hard_blocks.join("; "),
+                    });
+                    let _ = self.write_checkpoint();
                     return self.final_error();
                 }
             }
@@ -461,7 +481,11 @@ impl Orchestrator {
         }
 
         // Phase 3: Confirmation
-        self.confirm_phase()?;
+        if let Err(e) = self.confirm_phase() {
+            self.last_error = Some(e);
+            self.phase = OrchestratorPhase::Failed;
+            return self.final_error();
+        }
         if self.phase == OrchestratorPhase::Failed {
             return self.final_error();
         }
@@ -472,13 +496,23 @@ impl Orchestrator {
         }
 
         // Phase 4: Execution
-        self.execute_phase()?;
+        if let Err(e) = self.execute_phase() {
+            self.last_error = Some(e);
+            self.phase = OrchestratorPhase::Failed;
+            let _ = self.write_checkpoint();
+            return self.final_error();
+        }
         if self.phase == OrchestratorPhase::Failed {
             return self.final_error();
         }
 
         // Phase 5: Validation
-        self.validate_phase()?;
+        if let Err(e) = self.validate_phase() {
+            self.last_error = Some(e);
+            self.phase = OrchestratorPhase::Failed;
+            let _ = self.write_checkpoint();
+            return self.final_error();
+        }
         if self.phase == OrchestratorPhase::Failed {
             return self.final_error();
         }
@@ -929,6 +963,39 @@ impl Orchestrator {
                             },
                         });
                     },
+                    (TweakClass::B, SystemTweak::SplitLockMitigate { .. }) => {
+                        let prev = self
+                            .env
+                            .as_ref()
+                            .map(|e| if e.hardware.kernel.split_lock_mitigate { "1" } else { "0" })
+                            .unwrap_or("1");
+
+                        self.rollback_manifest.push(RollbackEntry {
+                            key: "kernel.split_lock_mitigate".to_string(),
+                            previous_value: prev.to_string(),
+                            restore_method: RestoreMethod::Sysctl {
+                                key: "kernel.split_lock_mitigate".to_string(),
+                            },
+                        });
+                    },
+                    (TweakClass::B, SystemTweak::UlimitNofile { .. }) => {
+                        self.rollback_manifest.push(RollbackEntry {
+                            key: "ulimit_nofile".to_string(),
+                            previous_value: String::new(),
+                            restore_method: RestoreMethod::FileWrite {
+                                path: "/etc/security/limits.d/helix.conf".to_string(),
+                            },
+                        });
+                    },
+                    (TweakClass::C, SystemTweak::NvidiaPersistenceMode) => {
+                        self.rollback_manifest.push(RollbackEntry {
+                            key: "nvidia_persistence_mode".to_string(),
+                            previous_value: "Disabled".to_string(),
+                            restore_method: RestoreMethod::NvidiaSmi {
+                                args: vec!["-pm".to_string(), "0".to_string()],
+                            },
+                        });
+                    },
                     _ => {},
                 }
             }
@@ -1255,11 +1322,15 @@ impl Orchestrator {
     }
 
     /// Return the final error after failure.
-    fn final_error(&self) -> Result<(), PlayError> {
-        Err(PlayError::OrchestratorFailed {
-            phase: format!("{:?}", self.phase),
-            reason: "orchestrator failed".to_string(),
-        })
+    fn final_error(&mut self) -> Result<(), PlayError> {
+        if let Some(err) = self.last_error.take() {
+            Err(err)
+        } else {
+            Err(PlayError::OrchestratorFailed {
+                phase: format!("{:?}", self.phase),
+                reason: "orchestrator failed".to_string(),
+            })
+        }
     }
 }
 
