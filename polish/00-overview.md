@@ -3,6 +3,7 @@
 Assessment of what remains for a certified, professional-grade release.
 No code changes made for this document set.
 
+many files need removal, cost guide, workflows, etc for final release
 ## Index
 
 - `01-correctness.md` — latent bugs that make the tool look broken (#1–#6)

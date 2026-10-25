@@ -2,7 +2,7 @@
 set -e
 
 VERSION="${VERSION:-latest}"
-REPO="${REPO:-abdoumarkt/play}"
+REPO="${REPO:-abdoumarkaba/Helix}"
 
 # Detect architecture
 ARCH=$(uname -m)
@@ -27,13 +27,13 @@ else
   INSTALL_DIR="$HOME/.local/bin"
 fi
 
-echo "Downloading play ${VERSION} for ${ARCH}..."
+echo "Downloading helix ${VERSION} for ${ARCH}..."
 
 # Get download URL
 if [ "$VERSION" = "latest" ]; then
-  DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep "browser_download_url.*play-${TARGET}.tar.gz" | cut -d '"' -f 4)
+  DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep "browser_download_url.*helix-${TARGET}.tar.gz" | cut -d '"' -f 4)
 else
-  DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/play-${TARGET}.tar.gz"
+  DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/helix-${TARGET}.tar.gz"
 fi
 
 if [ -z "$DOWNLOAD_URL" ]; then
@@ -48,16 +48,16 @@ curl -fsSL "$DOWNLOAD_URL" -o play.tar.gz
 tar xzf play.tar.gz
 
 # Install main binary
-echo "Installing to ${INSTALL_DIR}/play..."
+echo "Installing to ${INSTALL_DIR}/helix..."
 mkdir -p "$INSTALL_DIR"
-mv play "$INSTALL_DIR/play"
-chmod +x "$INSTALL_DIR/play"
+mv helix "$INSTALL_DIR/helix"
+chmod +x "$INSTALL_DIR/helix"
 
 # Install play-helper if present in the archive
-if [ -f "play-helper" ]; then
-  echo "Installing play-helper to ${INSTALL_DIR}/play-helper..."
-  mv play-helper "$INSTALL_DIR/play-helper"
-  chmod +x "$INSTALL_DIR/play-helper"
+if [ -f "helix-helper" ]; then
+  echo "Installing helix-helper to ${INSTALL_DIR}/helix-helper..."
+  mv helix-helper "$INSTALL_DIR/helix-helper"
+  chmod +x "$INSTALL_DIR/helix-helper"
 fi
 
 # Install polkit policy if present (requires sudo for system-wide install)
@@ -80,13 +80,13 @@ rm -rf "$TMP_DIR"
 echo "Setting up bash completion..."
 COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
 mkdir -p "$COMPLETION_DIR"
-"$INSTALL_DIR/play" --generate-completion bash > "$COMPLETION_DIR/play" 2>/dev/null || echo "  (Completion setup skipped)"
+"$INSTALL_DIR/helix" --generate-completion bash > "$COMPLETION_DIR/helix" 2>/dev/null || echo "  (Completion setup skipped)"
 
 # Verify installation
 echo "Verifying installation..."
-if "$INSTALL_DIR/play" --version > /dev/null 2>&1; then
+if "$INSTALL_DIR/helix" --version > /dev/null 2>&1; then
   echo ""
-  echo "Done! Run 'play --help' to get started."
+  echo "Done! Run 'helix --help' to get started."
   echo ""
   echo "Note: System tweaks require polkit authentication."
   echo "      You will be prompted for your password when needed."
