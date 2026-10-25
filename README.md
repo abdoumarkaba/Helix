@@ -39,7 +39,7 @@ No config files. No setup wizard. No flags required.
 ### Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/abdoumarkaba/Just-Play/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/abdoumarkaba/Helix/main/install.sh | bash
 ```
 
 Or install manually:
@@ -234,7 +234,7 @@ Requires explicit user consent per invocation. Never applied on laptops.
 ### One-Liner
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/abdoumarkaba/Just-Play/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/abdoumarkaba/Helix/main/install.sh | bash
 ```
 
 ### From Source
