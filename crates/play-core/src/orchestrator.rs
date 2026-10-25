@@ -967,8 +967,8 @@ impl Orchestrator {
                         let prev = self
                             .env
                             .as_ref()
-                            .map(|e| if e.hardware.kernel.split_lock_mitigate { "1" } else { "0" })
-                            .unwrap_or("1");
+                            .map(|e| if e.hardware.kernel.split_lock_mitigate { "1".to_string() } else { "0".to_string() })
+                            .unwrap_or_else(|| "1".to_string());
 
                         self.rollback_manifest.push(RollbackEntry {
                             key: "kernel.split_lock_mitigate".to_string(),

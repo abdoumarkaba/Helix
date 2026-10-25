@@ -195,12 +195,57 @@ pub fn detect_kernel(proc_root: &Path, sys_root: &Path) -> Result<KernelProfile,
 /// Detect whether a battery is present — used to gate laptop-only tweaks.
 /// Reads the content of /sys/class/power_supply/BAT{0,1}/present and checks for "1".
 /// Some systems create the file with content "0" when no battery is present.
-fn is_laptop(sys_root: &Path) -> bool {
+pub fn is_laptop(sys_root: &Path) -> bool {
     for bat in ["BAT0", "BAT1"] {
         let path = sys_root.join(format!("class/power_supply/{bat}/present"));
         if let Ok(content) = fs::read_to_string(&path) {
             if content.trim() == "1" {
                 return true;
+            }
+        }
+    }
+    // Chassis type 8/9/10/14 = portable/laptop/notebook/sub-notebook
+    let chassis_path = sys_root.join("class/dmi/id/chassis_type");
+    if let Ok(content) = fs::read_to_string(&chassis_path) {
+        if let Ok(ct) = content.trim().parse::<u32>() {
+            if matches!(ct, 8 | 9 | 10 | 14) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Infer whether a GPU is a laptop/mobile part.
+pub fn is_laptop_gpu_model(model: &str) -> bool {
+    let m = model.to_lowercase();
+    m.contains("laptop") || m.contains("mobile") || m.contains("max-q")
+}
+
+/// Infer laptop GPU from model name, system chassis/battery, and CPU laptop flag.
+pub fn infer_laptop_gpu(model: &str, sys_root: Option<&Path>, is_laptop_cpu: bool) -> bool {
+    if is_laptop_gpu_model(model) {
+        return true;
+    }
+    if let Some(root) = sys_root {
+        if is_laptop(root) {
+            return true;
+        }
+    }
+    is_laptop_cpu
+}
+
+/// Check whether Mesa DXVK shared libraries are installed.
+fn dxvk_libs_present() -> bool {
+    let lib_dirs = ["/usr/lib", "/usr/lib64", "/usr/lib/x86_64-linux-gnu"];
+    for dir in lib_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with("libdxvk") && name.ends_with(".so") {
+                    return true;
+                }
             }
         }
     }
@@ -448,7 +493,7 @@ pub fn detect_gpu_lspci(cmd_runner: &dyn CommandRunner) -> Option<GpuProfile> {
             resizable_bar: false,
             dx12_feature_level: None,
         },
-        is_laptop_gpu: false,
+        is_laptop_gpu: is_laptop_gpu_model(gpu_model),
         nvidia_vbios_max_clock_mhz: None,
     })
 }
@@ -470,6 +515,7 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
 
     let mut gpu_vendor = GpuVendor::Unknown;
     let mut gpu_model = String::from("Unknown GPU");
+    let mut vulkan_version: Option<Version> = None;
 
     // Parse vulkaninfo output for device name and vendor
     // Format: deviceName         = Intel(R) Graphics (RPL-S)
@@ -482,7 +528,24 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
                 debug!("Found deviceName: {}", gpu_model);
             }
         }
-        if line.contains("vendorID") {
+        if line.contains("apiVersion") {
+            if vulkan_version.is_none() {
+                if let Some(v) = line.split('=').nth(1) {
+                    let s = v.trim();
+                    if let Ok(ver) = Version::parse(s) {
+                        vulkan_version = Some(ver);
+                    } else {
+                        let parts: Vec<&str> = s.split('.').collect();
+                        if parts.len() >= 2 {
+                            let major = parts[0].parse::<u64>().unwrap_or(0);
+                            let minor = parts[1].parse::<u64>().unwrap_or(0);
+                            let patch = parts.get(2).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+                            vulkan_version = Some(Version::new(major, minor, patch));
+                        }
+                    }
+                }
+            }
+        } else if line.contains("vendorID") {
             // Split by '=' and take the second part
             if let Some(vendor) = line.split('=').nth(1) {
                 let vendor_str = vendor.trim();
@@ -508,22 +571,26 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
 
     info!(vendor = ?gpu_vendor, model = %gpu_model, method = "vulkaninfo", "gpu detection");
 
+    let vk_12 = vulkan_version.as_ref().map(|v| v.major > 1 || (v.major == 1 && v.minor >= 2)).unwrap_or(false);
+    let vk_13 = vulkan_version.as_ref().map(|v| v.major > 1 || (v.major == 1 && v.minor >= 3)).unwrap_or(false);
+    let dx12 = if gpu_vendor == GpuVendor::NVIDIA { Some("12_1".to_string()) } else { None };
+
     Some(GpuProfile {
         vendor: gpu_vendor,
-        model: gpu_model,
+        model: gpu_model.clone(),
         vram_mb: 0,
         driver_version: Version::new(0, 0, 0),
-        vulkan_version: None,
+        vulkan_version,
         driver_type: DriverType::Unknown,
         features: GpuFeatureSet {
-            vulkan_1_2: false,
-            vulkan_1_3: false,
+            vulkan_1_2: vk_12,
+            vulkan_1_3: vk_13,
             ray_tracing: false,
             mesh_shaders: false,
             resizable_bar: false,
-            dx12_feature_level: None,
+            dx12_feature_level: dx12,
         },
-        is_laptop_gpu: false,
+        is_laptop_gpu: is_laptop_gpu_model(&gpu_model),
         nvidia_vbios_max_clock_mhz: None,
     })
 }
@@ -536,7 +603,7 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
     // Query GPU name, VRAM, and driver version
     let output = match cmd_runner.run_command(
         "nvidia-smi",
-        &["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"],
+        &["--query-gpu=name,memory.total,driver_version,clocks.max.graphics", "--format=csv,noheader,nounits"],
     ) {
         Ok(out) => out,
         Err(e) => {
@@ -550,6 +617,7 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
         let name = parts[0].trim().to_string();
         let vram_str = parts[1].trim();
         let driver_str = parts[2].trim();
+        let clock_str = parts.get(3).map(|s| s.trim()).unwrap_or("");
 
         // Parse VRAM (format: "4096 MiB")
         // nvidia-smi returns memory.total in MiB, so we keep the value as-is
@@ -565,11 +633,14 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
             .map(|major| Version::new(major, 0, 0))
             .unwrap_or_else(|| Version::new(0, 0, 0));
 
+        // Parse VBIOS max graphics clock if present.
+        let vbios_clock = clock_str.parse::<u32>().ok();
+
         info!(vendor = "NVIDIA", model = %name, vram_mb, driver = %driver_str, method = "nvidia-smi", "gpu detection");
 
         return Some(GpuProfile {
             vendor: GpuVendor::NVIDIA,
-            model: name,
+            model: name.clone(),
             vram_mb,
             driver_version,
             vulkan_version: None,
@@ -580,10 +651,10 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
                 ray_tracing: true, // NVIDIA RTX cards support RT
                 mesh_shaders: true,
                 resizable_bar: false, // Would need to check
-                dx12_feature_level: None,
+                dx12_feature_level: Some("12_1".to_string()),
             },
-            is_laptop_gpu: false,             // TODO: Detect from name
-            nvidia_vbios_max_clock_mhz: None, // Would need extra query
+            is_laptop_gpu: is_laptop_gpu_model(&name),
+            nvidia_vbios_max_clock_mhz: vbios_clock,
         });
     }
 
@@ -643,7 +714,7 @@ pub fn enrich_nvidia_gpu(
 ) -> Result<(), String> {
     let query_output = match cmd_runner.run_command(
         "nvidia-smi",
-        &["--query-gpu=clocks.max.gr,memory.total,driver_version", "--format=csv,noheader"],
+        &["--query-gpu=clocks.max.graphics,memory.total,driver_version", "--format=csv,noheader,nounits"],
     ) {
         Ok(output) => output,
         Err(e) => {
@@ -663,11 +734,18 @@ pub fn enrich_nvidia_gpu(
         // Only parse driver version if not already set (from initial detection)
         // NVIDIA driver versions like "580.142" don't match semver format
         if gpu.driver_version == Version::new(0, 0, 0) {
-            if let Ok(version) = Version::parse(parts[2].trim()) {
+            let driver_str = parts[2].trim();
+            if let Ok(version) = Version::parse(driver_str) {
                 gpu.driver_version = version;
+            } else if let Some(major) = driver_str.split('.').next().and_then(|s| s.parse::<u64>().ok()) {
+                gpu.driver_version = Version::new(major, 0, 0);
             }
         }
         gpu.driver_type = DriverType::NvidiaProprietary;
+        if gpu.features.dx12_feature_level.is_none() {
+            gpu.features.dx12_feature_level = Some("12_1".to_string());
+        }
+        gpu.is_laptop_gpu = infer_laptop_gpu(&gpu.model, None, gpu.is_laptop_gpu);
     }
 
     info!(
@@ -677,6 +755,126 @@ pub fn enrich_nvidia_gpu(
         "nvidia gpu enrichment complete"
     );
     Ok(())
+}
+
+/// Enrich GPU profile with Vulkan apiVersion from `vulkaninfo --summary`.
+pub fn enrich_vulkan_info(gpu: &mut GpuProfile, cmd_runner: &dyn CommandRunner) {
+    let output = match cmd_runner.run_command("vulkaninfo", &["--summary"]) {
+        Ok(out) => out,
+        Err(_) => return,
+    };
+
+    // Block-based parse to pick the device matching this GPU (prefer discrete).
+    struct VkDevice {
+        name: String,
+        api: Option<Version>,
+        discrete: bool,
+        vendor: GpuVendor,
+    }
+    let mut devices: Vec<VkDevice> = Vec::new();
+    let mut current: Option<VkDevice> = None;
+    for line in output.lines() {
+        let t = line.trim();
+        if t.starts_with("GPU") && t.contains(':') {
+            if let Some(d) = current.take() {
+                devices.push(d);
+            }
+            current = Some(VkDevice {
+                name: String::new(),
+                api: None,
+                discrete: false,
+                vendor: GpuVendor::Unknown,
+            });
+            continue;
+        }
+        if let Some(d) = &mut current {
+            if t.contains("deviceName") {
+                if let Some(n) = t.split('=').nth(1) {
+                    d.name = n.trim().to_string();
+                }
+            } else if t.contains("apiVersion") {
+                if let Some(v) = t.split('=').nth(1) {
+                    let s = v.trim();
+                    if let Ok(ver) = Version::parse(s) {
+                        d.api = Some(ver);
+                    } else {
+                        let parts: Vec<&str> = s.split('.').collect();
+                        if parts.len() >= 2 {
+                            let major = parts[0].parse::<u64>().unwrap_or(0);
+                            let minor = parts[1].parse::<u64>().unwrap_or(0);
+                            let patch = parts.get(2).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+                            d.api = Some(Version::new(major, minor, patch));
+                        }
+                    }
+                }
+            } else if t.contains("deviceType") && t.contains("DISCRETE") {
+                d.discrete = true;
+            } else if t.contains("vendorID") {
+                if let Some(v) = t.split('=').nth(1) {
+                    let s = v.trim();
+                    if s.contains("0x10de") || s.contains("NVIDIA") {
+                        d.vendor = GpuVendor::NVIDIA;
+                    } else if s.contains("0x1002") || s.contains("0x1022") || s.contains("AMD") {
+                        d.vendor = GpuVendor::AMD;
+                    } else if s.contains("0x8086") || s.contains("Intel") {
+                        d.vendor = GpuVendor::Intel;
+                    }
+                }
+            }
+        }
+    }
+    if let Some(d) = current.take() {
+        devices.push(d);
+    }
+
+    // Fallback flat parse.
+    if devices.is_empty() {
+        let mut d = VkDevice {
+            name: String::new(),
+            api: None,
+            discrete: false,
+            vendor: gpu.vendor,
+        };
+        for line in output.lines() {
+            let t = line.trim();
+            if t.contains("deviceName") {
+                if let Some(n) = t.split('=').nth(1) {
+                    d.name = n.trim().to_string();
+                }
+            }
+            if t.contains("apiVersion") && d.api.is_none() {
+                if let Some(v) = t.split('=').nth(1) {
+                    let s = v.trim();
+                    if let Ok(ver) = Version::parse(s) {
+                        d.api = Some(ver);
+                    }
+                }
+            }
+        }
+        devices.push(d);
+    }
+
+    // Choose matching device: prefer same vendor + discrete, then same vendor, then discrete, then first.
+    let chosen = devices
+        .iter()
+        .find(|d| d.vendor == gpu.vendor && d.discrete)
+        .or_else(|| devices.iter().find(|d| d.vendor == gpu.vendor))
+        .or_else(|| devices.iter().find(|d| d.discrete))
+        .or_else(|| devices.first());
+
+    if let Some(d) = chosen {
+        if let Some(api) = &d.api {
+            gpu.vulkan_version = Some(api.clone());
+            let v12 = api.major > 1 || (api.major == 1 && api.minor >= 2);
+            let v13 = api.major > 1 || (api.major == 1 && api.minor >= 3);
+            gpu.features.vulkan_1_2 = v12;
+            gpu.features.vulkan_1_3 = v13;
+        }
+    }
+
+    if gpu.vendor == GpuVendor::NVIDIA && gpu.features.dx12_feature_level.is_none() {
+        gpu.features.dx12_feature_level = Some("12_1".to_string());
+    }
 }
 
 /// Detect AMD GPU (stub for v1 — returns NotApplicable decision).
@@ -917,8 +1115,9 @@ pub fn detect_gaming_tools(
         info!("Winetricks not available");
     }
 
-    // Check gamemode (via gamemoderun binary)
-    let gamemode_installed = cmd_runner.run_command("gamemoderun", &["--version"]).is_ok()
+    // Check gamemode (binary or gamemoded daemon)
+    let gamemode_installed = cmd_runner.run_command("gamemoded", &["--version"]).is_ok()
+        || cmd_runner.run_command("gamemoderun", &["--version"]).is_ok()
         || cmd_runner.run_command("gamemode", &["--version"]).is_ok();
     if gamemode_installed {
         info!("GameMode detected");
@@ -926,10 +1125,23 @@ pub fn detect_gaming_tools(
         info!("GameMode not available");
     }
 
-    // Check dxvk (via dxvk version or directory check)
+    // Check dxvk (command, dxvk.conf, or Mesa DXVK libs)
+    let home = dirs::home_dir().unwrap_or_default();
+    let dxvk_paths = [
+        home.join(".local/share/dxvk"),
+        home.join(".config/dxvk.conf"),
+        home.join(".config/dxvk/dxvk.conf"),
+    ];
+    let dxvk_dirs = [
+        std::path::Path::new("/usr/share/dxvk"),
+        std::path::Path::new("/usr/lib/dxvk"),
+        std::path::Path::new("/usr/lib64/dxvk"),
+        std::path::Path::new("/usr/lib/x86_64-linux-gnu/dxvk"),
+    ];
     let dxvk_installed = cmd_runner.run_command("dxvk", &["--version"]).is_ok()
-        || std::path::Path::new(&dirs::home_dir().unwrap_or_default().join(".local/share/dxvk"))
-            .exists();
+        || dxvk_paths.iter().any(|p| p.exists())
+        || dxvk_dirs.iter().any(|p| p.exists())
+        || dxvk_libs_present();
     if dxvk_installed {
         info!("DXVK detected");
     } else {
@@ -1067,8 +1279,20 @@ pub fn detect_hardware(
         GpuVendor::Unknown => {},
     }
 
-    // Check if GPU is a laptop GPU
-    gpu.is_laptop_gpu = is_laptop(sys_root);
+    // Enrich Vulkan info (apiVersion) when not already present.
+    if gpu.vulkan_version.is_none() {
+        enrich_vulkan_info(&mut gpu, cmd_runner);
+    }
+    if gpu.vendor == GpuVendor::NVIDIA && gpu.features.dx12_feature_level.is_none() {
+        gpu.features.dx12_feature_level = Some("12_1".to_string());
+    }
+    if gpu.vendor == GpuVendor::NVIDIA && gpu.nvidia_vbios_max_clock_mhz.is_none() {
+        // Attempt enrichment if not already done (idempotent-ish).
+        let _ = enrich_nvidia_gpu(&mut gpu, cmd_runner);
+    }
+
+    // Infer laptop GPU from model name, chassis/battery, and CPU.
+    gpu.is_laptop_gpu = infer_laptop_gpu(&gpu.model, Some(sys_root), cpu.is_laptop_cpu);
 
     let audio = detect_audio(cmd_runner);
     let display = detect_display(cmd_runner, wayland_display, x_display);

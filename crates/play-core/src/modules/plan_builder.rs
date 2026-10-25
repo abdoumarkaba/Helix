@@ -190,7 +190,8 @@ impl<'a> PlanBuilder<'a> {
         // Spec §11: VKD3D_FEATURE_LEVEL when VKD3D-Proton is selected
         if translation_layer == crate::models::environment::TranslationLayer::Vkd3dProton {
             if let Some(ref fl) = self.env.hardware.gpu.features.dx12_feature_level {
-                env.launch.env.insert("VKD3D_FEATURE_LEVEL".to_owned(), format!("12_{}", fl));
+                // dx12_feature_level stores the full level string (e.g. "12_1").
+                env.launch.env.insert("VKD3D_FEATURE_LEVEL".to_owned(), fl.clone());
             }
         }
 
