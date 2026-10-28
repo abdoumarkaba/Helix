@@ -16,7 +16,7 @@ use crate::models::environment::{
 use crate::models::errors::PlayError;
 use crate::models::plan::{
     GamePlan, LaunchAction, PlanWarning, PlannedTweak, RequiredPackage, RunnerAction,
-    RunnersManifest, TweakDecision, TweakId,
+    RunnersManifest, TweakClass, TweakDecision, TweakId,
 };
 
 use super::decision_engine::DecisionEngine;
@@ -482,6 +482,30 @@ impl<'a> PlanBuilder<'a> {
                     ),
                     install_hint: Some(install_cmd.to_owned()),
                 });
+            }
+        }
+
+        // Persistent tweak state: skip Class B tweaks already applied in a prior session.
+        let state = crate::tweak_state::TweakState::load();
+        for tweak in &mut tweaks {
+            if tweak.class != TweakClass::B {
+                continue;
+            }
+            if !matches!(tweak.decision, TweakDecision::Apply(_)) {
+                continue;
+            }
+            let key = match tweak.id {
+                TweakId::VmMaxMapCount => "VmMaxMapCount",
+                TweakId::ThpMadvise => "ThpMadvise",
+                TweakId::SchedAutogroup => "SchedAutogroup",
+                TweakId::SplitLockMitigate => "SplitLockMitigate",
+                TweakId::UlimitNofile => "UlimitNofile",
+                _ => continue,
+            };
+            if state.get(key).is_some() {
+                tweak.decision = TweakDecision::NotApplicable {
+                    reason: "Already applied in a previous session.".to_owned(),
+                };
             }
         }
 
