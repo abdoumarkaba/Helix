@@ -457,7 +457,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
     println!("  Samples: {}", session.samples.len());
 
     // Print FPS statistics
-    if let Some(fps) = session.fps_stats {
+    if let Some(ref fps) = session.fps_stats {
         println!("\n{}", style("FPS Statistics").green().bold());
         println!("  Average: {:.2}", fps.avg);
         println!("  Minimum: {:.2}", fps.min);
@@ -467,7 +467,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
     }
 
     // Print frametime statistics
-    if let Some(ft) = session.frametime_stats {
+    if let Some(ref ft) = session.frametime_stats {
         println!("\n{}", style("Frametime Statistics").green().bold());
         println!("  Average: {:.2} ms", ft.avg);
         println!("  Minimum: {:.2} ms", ft.min);
@@ -477,7 +477,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
     }
 
     // Print CPU statistics
-    if let Some(cpu) = session.cpu_stats {
+    if let Some(ref cpu) = session.cpu_stats {
         println!("\n{}", style("CPU Load Statistics").green().bold());
         println!("  Average: {:.1}%", cpu.avg);
         println!("  Minimum: {:.1}%", cpu.min);
@@ -485,7 +485,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
     }
 
     // Print GPU statistics
-    if let Some(gpu) = session.gpu_stats {
+    if let Some(ref gpu) = session.gpu_stats {
         println!("\n{}", style("GPU Load Statistics").green().bold());
         println!("  Average: {:.1}%", gpu.avg);
         println!("  Minimum: {:.1}%", gpu.min);
@@ -493,15 +493,47 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
     }
 
     // Print RAM statistics
-    if let Some(ram) = session.ram_stats {
+    if let Some(ref ram) = session.ram_stats {
         println!("\n{}", style("RAM Usage Statistics").green().bold());
         println!("  Average: {:.1} MiB", ram.avg);
         println!("  Minimum: {:.1} MiB", ram.min);
         println!("  Maximum: {:.1} MiB", ram.max);
     }
 
+    // Frame-stall analysis (roadmap item 24)
+    let stall_report = helix_core::execution::mangohud::analyze_session(&session);
+    if !stall_report.stalls.is_empty() {
+        println!("\n{}", style("Frame-Stall Analysis").green().bold());
+        println!(
+            "  Median frametime: {:.2} ms, p99: {:.2} ms",
+            stall_report.median_frametime_ms, stall_report.p99_frametime_ms
+        );
+        println!(
+            "  Stalls: {} total (shader-compile: {}, scheduler: {}, unknown: {})",
+            stall_report.stalls.len(),
+            stall_report.shader_compile_count,
+            stall_report.scheduler_count,
+            stall_report.unknown_count
+        );
+        println!("  Top stalls:");
+        for stall in stall_report.stalls.iter().take(5) {
+            println!(
+                "    t={}ms ft={:.1}ms cpu={:.0}% gpu={:.0}% {:?}",
+                stall.time_ms, stall.frametime_ms, stall.cpu_load, stall.gpu_load, stall.kind
+            );
+        }
+        if stall_report.shader_compile_count > 0 {
+            println!(
+                "  Hint: shader-compile stalls detected; DXVK cache should reduce them on later runs."
+            );
+        }
+        if stall_report.scheduler_count > 0 {
+            println!("  Hint: scheduler stalls detected; consider the sched_autogroup tweak.");
+        }
+    }
+
     // Print VRAM statistics
-    if let Some(vram) = session.vram_stats {
+    if let Some(ref vram) = session.vram_stats {
         println!("\n{}", style("VRAM Usage Statistics").green().bold());
         println!("  Average: {:.1} MiB", vram.avg);
         println!("  Minimum: {:.1} MiB", vram.min);

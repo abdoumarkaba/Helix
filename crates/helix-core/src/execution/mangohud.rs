@@ -447,3 +447,169 @@ mod tests {
         assert!(vars.iter().any(|(k, _)| k == "MANGOHUD_LOG_FILE"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Frame-stall analysis (roadmap item 24)
+// ---------------------------------------------------------------------------
+
+/// Classification of a slow frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StallKind {
+    /// CPU busy, GPU idle, usually early in the run: shader compilation.
+    ShaderCompile,
+    /// Both CPU and GPU busy: scheduling contention.
+    Scheduler,
+    /// Could not be classified from available metrics.
+    Unknown,
+}
+
+/// A single slow frame detected in a MangoHud session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrameStall {
+    pub time_ms: u64,
+    pub frametime_ms: f32,
+    pub cpu_load: f32,
+    pub gpu_load: f32,
+    pub kind: StallKind,
+}
+
+/// Summary of stall analysis for a session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StallReport {
+    pub stalls: Vec<FrameStall>,
+    pub shader_compile_count: usize,
+    pub scheduler_count: usize,
+    pub unknown_count: usize,
+    pub median_frametime_ms: f32,
+    pub p99_frametime_ms: f32,
+}
+
+/// Analyze a MangoHud session for frame stalls and classify them.
+///
+/// Pure function: no I/O, no global state. Safe to call from tests.
+pub fn analyze_session(session: &MangoHudSession) -> StallReport {
+    if session.samples.is_empty() {
+        return StallReport::default();
+    }
+
+    // Median frametime.
+    let mut frametimes: Vec<f32> = session
+        .samples
+        .iter()
+        .map(|s| s.frametime_ms)
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .collect();
+    frametimes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = if frametimes.is_empty() {
+        0.0
+    } else {
+        let mid = frametimes.len() / 2;
+        if frametimes.len() % 2 == 0 {
+            (frametimes[mid - 1] + frametimes[mid]) / 2.0
+        } else {
+            frametimes[mid]
+        }
+    };
+
+    // p99 frametime.
+    let p99 = if frametimes.is_empty() {
+        0.0
+    } else {
+        let idx = ((frametimes.len() as f32) * 0.99) as usize;
+        let idx = idx.min(frametimes.len().saturating_sub(1));
+        frametimes[idx]
+    };
+
+    let threshold = (median * 3.0).max(50.0);
+
+    let mut report = StallReport {
+        median_frametime_ms: median,
+        p99_frametime_ms: p99,
+        ..StallReport::default()
+    };
+
+    for sample in &session.samples {
+        if !sample.frametime_ms.is_finite() || sample.frametime_ms < threshold {
+            continue;
+        }
+        let kind = if sample.time_ms < 120_000 || (sample.gpu_load < 40.0 && sample.cpu_load > 60.0)
+        {
+            StallKind::ShaderCompile
+        } else if sample.cpu_load >= 80.0 && sample.gpu_load >= 60.0 {
+            StallKind::Scheduler
+        } else {
+            StallKind::Unknown
+        };
+        match kind {
+            StallKind::ShaderCompile => report.shader_compile_count += 1,
+            StallKind::Scheduler => report.scheduler_count += 1,
+            StallKind::Unknown => report.unknown_count += 1,
+        }
+        report.stalls.push(FrameStall {
+            time_ms: sample.time_ms,
+            frametime_ms: sample.frametime_ms,
+            cpu_load: sample.cpu_load,
+            gpu_load: sample.gpu_load,
+            kind,
+        });
+    }
+
+    report
+}
+
+#[cfg(test)]
+mod stall_tests {
+    use super::*;
+
+    fn mk_session(frametimes: &[(u64, f32, f32, f32)]) -> MangoHudSession {
+        let mut s = MangoHudSession::new("test".to_string());
+        for (t, ft, cpu, gpu) in frametimes {
+            s.add_sample(MangoHudSample {
+                time_ms: *t,
+                fps: 1000.0 / *ft,
+                frametime_ms: *ft,
+                cpu_load: *cpu,
+                gpu_load: *gpu,
+                ram_mib: 0.0,
+                vram_mib: 0.0,
+                ..MangoHudSample::default()
+            });
+        }
+        s.finalize();
+        s
+    }
+
+    #[test]
+    fn empty_session_no_stalls() {
+        let s = MangoHudSession::new("empty".to_string());
+        let r = analyze_session(&s);
+        assert!(r.stalls.is_empty());
+    }
+
+    #[test]
+    fn early_spike_classified_shader_compile() {
+        // baseline 16ms frames + one 200ms spike early, low GPU load
+        let mut frames = vec![];
+        for i in 0..200u64 {
+            frames.push((i * 100, 16.0, 30.0, 70.0));
+        }
+        frames.push((5_000, 200.0, 90.0, 20.0));
+        let s = mk_session(&frames);
+        let r = analyze_session(&s);
+        assert_eq!(r.shader_compile_count, 1);
+        assert_eq!(r.scheduler_count, 0);
+    }
+
+    #[test]
+    fn high_cpu_gpu_spike_classified_scheduler() {
+        let mut frames = vec![];
+        for i in 0..200u64 {
+            frames.push((i * 100, 16.0, 30.0, 70.0));
+        }
+        // late spike, both busy
+        frames.push((150_000, 200.0, 95.0, 90.0));
+        let s = mk_session(&frames);
+        let r = analyze_session(&s);
+        assert_eq!(r.scheduler_count, 1);
+    }
+}
