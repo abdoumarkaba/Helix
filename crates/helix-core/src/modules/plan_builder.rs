@@ -67,7 +67,8 @@ impl<'a> PlanBuilder<'a> {
         // Construct DXVK cache path for first-run detection
         let cache_dir = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("play/cache")
+            .join("helix")
+            .join("cache")
             .join(&self.env.identity.exe_hash);
         let cache_path = cache_dir.join("dxvk-cache");
         let (async_compile, dec) =
@@ -201,8 +202,10 @@ impl<'a> PlanBuilder<'a> {
             info!("MangoHud auto-enabled (installed and detected)");
 
             // Configure MangoHud logging for detailed metrics capture
-            let log_dir =
-                dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("play/logs");
+            let log_dir = dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join("helix")
+                .join("logs");
             let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
             let log_path = log_dir.join(format!("mangohud_{}.csv", timestamp));
 
@@ -277,7 +280,8 @@ impl<'a> PlanBuilder<'a> {
                     // Create stub directory
                     let stub_path = dirs::data_local_dir()
                         .unwrap_or_else(|| PathBuf::from("/tmp"))
-                        .join("play/steam-stub");
+                        .join("helix")
+                        .join("steam-stub");
                     if let Err(e) = std::fs::create_dir_all(&stub_path) {
                         warn!(
                             "Failed to create Steam stub directory {}: {}",
@@ -292,7 +296,8 @@ impl<'a> PlanBuilder<'a> {
                 // DXVK state cache path for persistence
                 let cache_dir = dirs::data_local_dir()
                     .unwrap_or_else(|| PathBuf::from("/tmp"))
-                    .join("play/cache")
+                    .join("helix")
+                    .join("cache")
                     .join(&env.identity.exe_hash);
                 if let Err(e) = std::fs::create_dir_all(&cache_dir) {
                     warn!("Failed to create DXVK cache directory {}: {}", cache_dir.display(), e);
@@ -330,7 +335,7 @@ impl<'a> PlanBuilder<'a> {
         let launch_action = LaunchAction::Spawn {
             exe_path,
             working_dir,
-            args: Vec::new(), // TODO: Allow CLI args
+            args: env.launch.args.clone(),
             env: env.launch.env.clone(),
             runner_path: runner_install_path,
             runner_type: env.runner.runner_type,

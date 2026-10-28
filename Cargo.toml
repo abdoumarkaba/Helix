@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/play-cli", "crates/play-core", "crates/play-helper", "crates/play-db-tools"]
+members = ["crates/helix-cli", "crates/helix-core", "crates/helix-helper", "crates/helix-db-tools"]
 resolver = "2"
 
 [workspace.package]

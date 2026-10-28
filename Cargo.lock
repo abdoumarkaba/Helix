@@ -524,6 +524,67 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "helix-cli"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "clap_complete",
+ "console",
+ "dirs",
+ "helix-core",
+ "indicatif",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "helix-core"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "chrono",
+ "console",
+ "dialoguer",
+ "dirs",
+ "glob",
+ "goblin",
+ "indexmap",
+ "indicatif",
+ "nix",
+ "predicates",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sysinfo",
+ "tempfile",
+ "thiserror 1.0.69",
+ "toml",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "helix-db-tools"
+version = "0.1.0"
+
+[[package]]
+name = "helix-helper"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -864,67 +925,6 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
-
-[[package]]
-name = "play-cli"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "clap_complete",
- "console",
- "dirs",
- "indicatif",
- "play-core",
- "serde_json",
- "tempfile",
- "toml",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "play-core"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "chrono",
- "console",
- "dialoguer",
- "dirs",
- "glob",
- "goblin",
- "indexmap",
- "indicatif",
- "nix",
- "predicates",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "sysinfo",
- "tempfile",
- "thiserror 1.0.69",
- "toml",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "ureq",
- "uuid",
-]
-
-[[package]]
-name = "play-db-tools"
-version = "0.1.0"
-
-[[package]]
-name = "play-helper"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "portable-atomic"

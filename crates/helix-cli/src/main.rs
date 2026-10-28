@@ -31,25 +31,29 @@ use serde_json::Value as JsonValue;
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 
-use play_core::execution::mangohud::MangoHudParser;
-use play_core::models::environment::GameEnvironment;
-use play_core::models::errors::PlayError;
-use play_core::models::metrics::SessionMetrics;
-use play_core::modules::detection::RealCommandRunner;
-use play_core::modules::validation::FpsMetrics;
-use play_core::orchestrator::{Orchestrator, OrchestratorPhase};
+use helix_core::execution::mangohud::MangoHudParser;
+use helix_core::models::environment::GameEnvironment;
+use helix_core::models::errors::PlayError;
+use helix_core::models::metrics::SessionMetrics;
+use helix_core::modules::detection::RealCommandRunner;
+use helix_core::modules::validation::FpsMetrics;
+use helix_core::orchestrator::{Orchestrator, OrchestratorPhase};
 
 // ---------------------------------------------------------------------------
 // CLI Arguments
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(name = "play")]
+#[command(name = "helix")]
 #[command(about = "Linux gaming orchestrator — zero-config Windows game launcher")]
 #[command(version)]
 struct CliArgs {
     /// Path to game executable
     exe_path: Option<PathBuf>,
+
+    /// Additional arguments forwarded to the game
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    game_args: Vec<String>,
 
     /// Auto-confirm without interactive prompt
     #[arg(long)]
@@ -66,6 +70,10 @@ struct CliArgs {
     /// Plan only, do not execute
     #[arg(long)]
     dry_run: bool,
+
+    /// Stop the tracked game process for this executable
+    #[arg(long)]
+    stop: bool,
 
     /// File a crash report for last session
     #[arg(long)]
@@ -100,8 +108,17 @@ struct CliArgs {
 // Tracing Setup
 // ---------------------------------------------------------------------------
 
+fn helix_data_dir() -> PathBuf {
+    data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("helix")
+}
+
+#[allow(dead_code)]
+fn legacy_data_dir() -> PathBuf {
+    data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play")
+}
+
 fn get_log_dir() -> PathBuf {
-    data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("logs")
+    helix_data_dir().join("logs")
 }
 
 fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
@@ -131,7 +148,7 @@ fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
     Box::leak(Box::new(_guard));
 
     // Always verbose for now - show everything to console
-    let filter = "play_core=debug,play_cli=debug,info";
+    let filter = "helix_core=debug,play_cli=debug,info";
 
     // Set up console output in addition to file
     let console_layer = tracing_subscriber::fmt::layer()
@@ -165,7 +182,7 @@ fn display_error_with_context(
     error: &PlayError,
     exe_path: &Path,
     log_path: &Path,
-    rollback_entries: &[play_core::orchestrator::RollbackEntry],
+    rollback_entries: &[helix_core::orchestrator::RollbackEntry],
 ) {
     eprintln!("\n  {} {}", style("Error:").red().bold(), error);
 
@@ -304,7 +321,7 @@ fn show_log_path(_log_path: &Path) {
 // ---------------------------------------------------------------------------
 
 fn review_mangohud_logs() -> Result<(), PlayError> {
-    let log_dir = data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play/logs");
+    let log_dir = helix_data_dir().join("logs");
 
     if !log_dir.exists() {
         eprintln!(
@@ -556,8 +573,7 @@ fn write_metrics(
 
 fn undo_game(exe_path: &Path) -> Result<(), PlayError> {
     // Scan for checkpoint matching this exe_path
-    let games_root =
-        data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games");
+    let games_root = helix_data_dir().join("games");
 
     let matching_checkpoint = find_checkpoint_by_exe_path(&games_root, exe_path)?;
 
@@ -624,6 +640,31 @@ fn find_checkpoint_by_exe_path(
         }
     }
 
+    // One-release fallback to legacy play/ data dir.
+    let legacy_root = legacy_data_dir().join("games");
+    if games_root != legacy_root && legacy_root.exists() {
+        if let Ok(entries) = std::fs::read_dir(&legacy_root) {
+            for entry in entries.flatten() {
+                let state_root = entry.path();
+                let checkpoint_path = state_root.join("checkpoint.json");
+                if checkpoint_path.exists() {
+                    if let Ok(contents) = std::fs::read_to_string(&checkpoint_path) {
+                        if let Ok(json) = serde_json::from_str::<JsonValue>(&contents) {
+                            let stored_path = json
+                                .get("env")
+                                .and_then(|e| e.get("identity"))
+                                .and_then(|i| i.get("exe_path"))
+                                .and_then(|p| p.as_str());
+                            if stored_path == Some(exe_path.to_string_lossy().as_ref()) {
+                                return Ok(Some((state_root, json)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(None)
 }
 
@@ -632,19 +673,18 @@ fn find_checkpoint_by_exe_path(
 // ---------------------------------------------------------------------------
 
 fn get_runners_root() -> PathBuf {
-    data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("runners")
+    helix_data_dir().join("runners")
 }
 
 fn get_prefix_root() -> PathBuf {
-    data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("prefixes")
+    helix_data_dir().join("prefixes")
 }
 
 fn create_orchestrator(
-    cmd_runner: Box<dyn play_core::modules::detection::CommandRunner>,
+    cmd_runner: Box<dyn helix_core::modules::detection::CommandRunner>,
     exe_path: &Path,
 ) -> Orchestrator {
-    let games_root =
-        data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share")).join("play").join("games");
+    let games_root = helix_data_dir().join("games");
 
     // Check if there's an existing checkpoint for this exe
     if let Ok(Some((state_root, _checkpoint))) = find_checkpoint_by_exe_path(&games_root, exe_path)
@@ -674,8 +714,8 @@ fn main() {
 
     // --detect-only: run hardware detection only, output JSON, exit
     if args.detect_only {
-        let cmd_runner = Box::new(play_core::modules::detection::RealCommandRunner);
-        match play_core::modules::detection::detect_hardware(
+        let cmd_runner = Box::new(helix_core::modules::detection::RealCommandRunner);
+        match helix_core::modules::detection::detect_hardware(
             std::path::Path::new("/proc"),
             std::path::Path::new("/sys"),
             std::path::Path::new("/etc"),
@@ -715,12 +755,12 @@ fn main() {
             },
         };
         let mut cmd = CliArgs::command();
-        generate(shell, &mut cmd, "play", &mut std::io::stdout());
+        generate(shell, &mut cmd, "helix", &mut std::io::stdout());
         return;
     }
 
     if args.about {
-        println!("{}", style("play").bold().cyan());
+        println!("{}", style("helix").bold().cyan());
         println!("  Linux gaming orchestrator — zero-config Windows game launcher");
         println!();
         println!("  Version: {}", env!("CARGO_PKG_VERSION"));
@@ -747,8 +787,8 @@ fn main() {
                 "{} Run with a .exe file to optimize your system and launch the game",
                 style("Usage:").green().bold()
             );
-            eprintln!("  {} play <game.exe>", style("Example:").dim());
-            eprintln!("  {} play --help for more options", style("Or:").dim());
+            eprintln!("  {} helix <game.exe>", style("Example:").dim());
+            eprintln!("  {} helix --help for more options", style("Or:").dim());
             std::process::exit(1);
         },
     };
@@ -777,11 +817,42 @@ fn main() {
         }
     }
 
+    // Handle stop command
+    if args.stop {
+        let pid_path = helix_data_dir().join("last_game.pid");
+        let pid =
+            std::fs::read_to_string(&pid_path).ok().and_then(|s| s.trim().parse::<u32>().ok());
+        match pid {
+            Some(pid) => {
+                println!("{} Stopping game (PID {})...", style("Stop:").yellow().bold(), pid);
+                // Send SIGTERM
+                let _ =
+                    std::process::Command::new("kill").arg("-TERM").arg(pid.to_string()).status();
+                // Give it a moment
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                // Check if still alive
+                if std::path::Path::new(&format!("/proc/{}", pid)).exists() {
+                    let _ = std::process::Command::new("kill")
+                        .arg("-KILL")
+                        .arg(pid.to_string())
+                        .status();
+                }
+                let _ = std::fs::remove_file(&pid_path);
+                println!("{}", style("✓ Stop complete").green());
+                return;
+            },
+            None => {
+                eprintln!("{} No tracked game PID found", style("Error:").red().bold());
+                std::process::exit(1);
+            },
+        }
+    }
+
     // Handle report command
     if args.report {
         let games_root = data_dir()
             .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-            .join("play")
+            .join("helix")
             .join("games");
 
         let matching = find_checkpoint_by_exe_path(&games_root, &exe_path).unwrap_or(None);
@@ -803,6 +874,87 @@ fn main() {
         return;
     }
 
+    // Handle --dry-run: plan only, no execution
+    if args.dry_run {
+        let cmd_runner = Box::new(helix_core::modules::detection::RealCommandRunner);
+        let mut orchestrator = create_orchestrator(cmd_runner, &exe_path);
+        orchestrator.set_launch_args(args.game_args.clone());
+        match orchestrator.plan_only(&exe_path) {
+            Ok(plan) => {
+                println!();
+                println!("{}", style("  HELIX DRY RUN").bold().cyan());
+                println!("{}", style("  ").cyan());
+                println!("  Game: {}", plan.env.identity.exe_name);
+                println!("  Path: {}", plan.env.identity.exe_path.display());
+                println!("  Hash: {}", plan.env.identity.exe_hash);
+                println!();
+                println!("  Runner: {:?} {}", plan.env.runner.runner_type, plan.env.runner.version);
+                match &plan.runner_action {
+                    helix_core::models::plan::RunnerAction::AlreadyInstalled { path } => {
+                        println!("  Runner action: already installed ({})", path.display());
+                    },
+                    helix_core::models::plan::RunnerAction::Download {
+                        url: _, version, ..
+                    } => {
+                        println!("  Runner action: download {}", version);
+                        println!("  Estimated download size: ~1.5 GB");
+                    },
+                }
+                match &plan.prefix_action {
+                    helix_core::models::plan::PrefixAction::AlreadyExists { path } => {
+                        println!("  Prefix: already exists ({})", path.display());
+                    },
+                    helix_core::models::plan::PrefixAction::Create { path, .. } => {
+                        println!("  Prefix: create ({})", path.display());
+                    },
+                }
+                println!(
+                    "  Applied tweaks: {}",
+                    plan.tweaks
+                        .iter()
+                        .filter(|t| matches!(
+                            t.decision,
+                            helix_core::models::plan::TweakDecision::Apply(_)
+                        ))
+                        .count()
+                );
+                for t in &plan.tweaks {
+                    if let helix_core::models::plan::TweakDecision::Apply(ref st) = t.decision {
+                        println!("    · {:?}: {:?}", t.id, st);
+                    }
+                }
+                if !plan.required_packages.is_empty() {
+                    println!("  Required packages:");
+                    for p in &plan.required_packages {
+                        println!("    - {} ({})", p.name, p.reason);
+                    }
+                }
+                if !plan.warnings.is_empty() {
+                    println!();
+                    for w in &plan.warnings {
+                        println!("  WARNING: {}", w.message);
+                        if let Some(h) = &w.install_hint {
+                            println!("    Hint: {}", h);
+                        }
+                    }
+                }
+                if !plan.hard_blocks.is_empty() {
+                    println!();
+                    println!("  HARD BLOCKS:");
+                    for b in &plan.hard_blocks {
+                        println!("    - {}", b);
+                    }
+                }
+                println!();
+                std::process::exit(0);
+            },
+            Err(e) => {
+                eprintln!("{} {}", style("Error:").red().bold(), e);
+                std::process::exit(1);
+            },
+        }
+    }
+
     // Main game launch flow
     let term = Term::stdout();
     let _ = term.write_line(&format!(
@@ -814,6 +966,7 @@ fn main() {
     // Create orchestrator (will use existing checkpoint path if found)
     let cmd_runner = Box::new(RealCommandRunner);
     let mut orchestrator = create_orchestrator(cmd_runner, &exe_path);
+    orchestrator.set_launch_args(args.game_args.clone());
 
     // Check for checkpoint recovery (unless --force-fresh is set)
     if !args.force_fresh {
@@ -851,7 +1004,7 @@ fn main() {
         let checkpoint_path = find_checkpoint_by_exe_path(
             &data_dir()
                 .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-                .join("play")
+                .join("helix")
                 .join("games"),
             &exe_path,
         )
@@ -950,7 +1103,7 @@ fn main() {
                     // For now, write placeholder metrics
                     let games_root = data_dir()
                         .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-                        .join("play")
+                        .join("helix")
                         .join("games");
                     if let Ok(Some((state_root, _))) =
                         find_checkpoint_by_exe_path(&games_root, &exe_path)

@@ -22,6 +22,14 @@ use crate::models::plan::RunnerAction;
 /// Maximum download retry attempts.
 const MAX_RETRIES: u8 = 3;
 
+/// Detect an available GUI progress tool.
+pub fn detect_gui_progress_tool() -> Option<&'static str> {
+    use std::process::Command;
+    ["zenity", "kdialog"].into_iter().find(|tool| {
+        Command::new("which").arg(tool).output().map(|o| o.status.success()).unwrap_or(false)
+    })
+}
+
 /// Buffer size for streaming downloads (64 KiB).
 const DOWNLOAD_BUF_SIZE: usize = 65536;
 

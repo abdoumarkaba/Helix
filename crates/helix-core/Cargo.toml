@@ -1,9 +1,13 @@
 [package]
-name = "play-core"
+name = "helix-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+
+[features]
+default = ["test-utils"]
+test-utils = []
 
 [dependencies]
 # Data

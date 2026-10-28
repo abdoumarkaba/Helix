@@ -1,5 +1,5 @@
 [package]
-name = "play-helper"
+name = "helix-helper"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

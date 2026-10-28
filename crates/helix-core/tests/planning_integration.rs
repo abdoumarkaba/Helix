@@ -3,9 +3,9 @@
 /// Uses fixture files from tests/fixtures/db/ — no real system access.
 use std::path::PathBuf;
 
-use play_core::models::environment::*;
-use play_core::models::plan::*;
-use play_core::modules::planning::PlanningModule;
+use helix_core::models::environment::*;
+use helix_core::models::plan::*;
+use helix_core::modules::planning::PlanningModule;
 
 fn planning_module() -> PlanningModule {
     PlanningModule::new(

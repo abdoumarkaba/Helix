@@ -375,11 +375,7 @@ impl DecisionEngine {
                 // Version components used for directory matching.
                 let version_str = version.to_string();
                 let parts: Vec<&str> = version_str.split('.').collect();
-                let (major, minor) = if parts.len() >= 2 {
-                    (parts[0], parts[1])
-                } else {
-                    ("", "")
-                };
+                let (major, minor) = if parts.len() >= 2 { (parts[0], parts[1]) } else { ("", "") };
 
                 // Scan installed Steam compatibility tools for a matching runner.
                 // - ProtonGE:        GE-Proton{major}-{minor}
@@ -399,8 +395,8 @@ impl DecisionEngine {
 
                         let is_ge = name_lower.starts_with("ge-proton")
                             || name_lower.starts_with("ge_proton");
-                        let is_cachy = name_lower.contains("cachy")
-                            && name_lower.contains("proton");
+                        let is_cachy =
+                            name_lower.contains("cachy") && name_lower.contains("proton");
 
                         let exact = match runner_type {
                             RunnerType::ProtonGE => is_ge,
@@ -613,18 +609,36 @@ impl DecisionEngine {
                     TweakDecision::Apply(SystemTweak::VmMaxMapCount { target })
                 }
             },
-            TweakId::ThpMadvise => TweakDecision::Apply(SystemTweak::ThpMadvise),
+            TweakId::ThpMadvise => {
+                if hw.kernel.thp_mode == crate::models::environment::ThpMode::Madvise {
+                    TweakDecision::AlreadySatisfied
+                } else {
+                    TweakDecision::Apply(SystemTweak::ThpMadvise)
+                }
+            },
             TweakId::SchedAutogroup => {
-                // Spec §10: "Wine/Proton active: evaluate sched_autogroup → 0" (disable).
-                // Disabling isolates the game's scheduler group so desktop processes
-                // don't steal time slices from the game's cgroup.
-                TweakDecision::Apply(SystemTweak::SchedAutogroup { enabled: false })
+                if !hw.kernel.sched_autogroup {
+                    TweakDecision::AlreadySatisfied
+                } else {
+                    TweakDecision::Apply(SystemTweak::SchedAutogroup { enabled: false })
+                }
             },
             TweakId::SplitLockMitigate => {
-                TweakDecision::Apply(SystemTweak::SplitLockMitigate { enabled: false })
+                if !hw.kernel.split_lock_mitigate {
+                    TweakDecision::AlreadySatisfied
+                } else {
+                    TweakDecision::Apply(SystemTweak::SplitLockMitigate { enabled: false })
+                }
             },
             TweakId::UlimitNofile => {
-                TweakDecision::Apply(SystemTweak::UlimitNofile { value: 524_288 })
+                let state = crate::tweak_state::TweakState::load();
+                if state.get("UlimitNofile").is_some()
+                    || std::path::Path::new("/etc/security/limits.d/helix.conf").exists()
+                {
+                    TweakDecision::AlreadySatisfied
+                } else {
+                    TweakDecision::Apply(SystemTweak::UlimitNofile { value: 524_288 })
+                }
             },
             TweakId::CpuGovernorPerformance => {
                 TweakDecision::Apply(SystemTweak::CpuGovernorPerformance)

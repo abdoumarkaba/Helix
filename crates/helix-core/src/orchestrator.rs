@@ -191,10 +191,10 @@ pub struct Orchestrator {
     post_confirm_callback: Option<PostConfirmCallback>,
     /// Handle to the spawned game process (set during execution phase).
     running_game: Option<std::process::Child>,
+    /// Launch args forwarded to the game (from CLI/Steam).
+    launch_args: Vec<String>,
     /// Progress callback for phase updates.
     progress_callback: Option<Box<dyn Fn(String) + Send>>,
-    /// The originating error of a failed run, if any.
-    last_error: Option<PlayError>,
 }
 
 impl Orchestrator {
@@ -263,8 +263,8 @@ impl Orchestrator {
             pre_confirm_callback: None,
             post_confirm_callback: None,
             running_game: None,
+            launch_args: Vec::new(),
             progress_callback: None,
-            last_error: None,
         }
     }
 
@@ -297,8 +297,44 @@ impl Orchestrator {
             pre_confirm_callback: None,
             post_confirm_callback: None,
             running_game: None,
+            launch_args: Vec::new(),
             progress_callback: None,
-            last_error: None,
+        }
+    }
+
+    /// Create an orchestrator with injectable roots and a temp state dir (for testing fresh runs).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_roots(
+        proc_root: PathBuf,
+        sys_root: PathBuf,
+        etc_root: PathBuf,
+        state_root_parent: PathBuf,
+        runners_root: PathBuf,
+        prefix_root: PathBuf,
+        cmd_runner: Box<dyn CommandRunner>,
+    ) -> Self {
+        let temp_id = temp_state_id();
+        let game_state_root = state_root_parent.join(&temp_id);
+        Self {
+            proc_root,
+            sys_root,
+            etc_root,
+            state_root_parent,
+            state_root: game_state_root,
+            runners_root,
+            prefix_root,
+            phase: OrchestratorPhase::Initialized,
+            env: None,
+            plan: None,
+            guards: None,
+            rollback_manifest: Vec::new(),
+            cmd_runner,
+            confirm_callback: None,
+            pre_confirm_callback: None,
+            post_confirm_callback: None,
+            running_game: None,
+            launch_args: Vec::new(),
+            progress_callback: None,
         }
     }
 
@@ -315,6 +351,41 @@ impl Orchestrator {
     /// Set post-confirmation callback (e.g., to resume progress bar).
     pub fn set_post_confirm_callback(&mut self, callback: PostConfirmCallback) {
         self.post_confirm_callback = Some(callback);
+    }
+
+    /// Set launch args forwarded to the game.
+    pub fn set_launch_args(&mut self, args: Vec<String>) {
+        self.launch_args = args;
+    }
+
+    /// Plan only: run detection + planning, return plan without confirmation/execution.
+    pub fn plan_only(&mut self, exe_path: &Path) -> Result<&GamePlan, PlayError> {
+        // Detection
+        if self.phase < OrchestratorPhase::Detected {
+            if let Err(e) = self.detect(exe_path) {
+                self.phase = OrchestratorPhase::Failed;
+                return Err(e);
+            }
+            if let Err(e) = self.rename_state_to_hash() {
+                self.phase = OrchestratorPhase::Failed;
+                return Err(e);
+            }
+        }
+        // Planning
+        if self.phase < OrchestratorPhase::Planned {
+            // apply launch args
+            if let Some(env) = self.env.as_mut() {
+                env.launch.args = self.launch_args.clone();
+            }
+            if let Err(e) = self.plan_phase() {
+                self.phase = OrchestratorPhase::Failed;
+                return Err(e);
+            }
+        }
+        self.plan.as_ref().ok_or_else(|| PlayError::OrchestratorFailed {
+            phase: "planning".to_string(),
+            reason: "no plan produced".to_string(),
+        })
     }
 
     /// Get the current plan (if planning has completed).
@@ -423,18 +494,13 @@ impl Orchestrator {
         // Phase 1: Detection (skip if already detected from checkpoint)
         if self.phase < OrchestratorPhase::Detected {
             if let Err(e) = self.detect(exe_path) {
-                self.last_error = Some(e);
                 self.phase = OrchestratorPhase::Failed;
-                return self.final_error();
-            }
-            if self.phase == OrchestratorPhase::Failed {
-                return self.final_error();
+                return Err(e);
             }
             // After detection, rename state directory to use real SHA256
             if let Err(e) = self.rename_state_to_hash() {
-                self.last_error = Some(e);
                 self.phase = OrchestratorPhase::Failed;
-                return self.final_error();
+                return Err(e);
             }
         } else {
             info!(
@@ -447,12 +513,8 @@ impl Orchestrator {
         // Phase 2: Planning (skip if already planned from checkpoint)
         if self.phase < OrchestratorPhase::Planned {
             if let Err(e) = self.plan_phase() {
-                self.last_error = Some(e);
                 self.phase = OrchestratorPhase::Failed;
-                return self.final_error();
-            }
-            if self.phase == OrchestratorPhase::Failed {
-                return self.final_error();
+                return Err(e);
             }
 
             // Check for hard blocks
@@ -464,12 +526,11 @@ impl Orchestrator {
                         "Planning found hard blocks, cannot proceed"
                     );
                     self.phase = OrchestratorPhase::Failed;
-                    self.last_error = Some(PlayError::OrchestratorFailed {
+                    let _ = self.write_checkpoint();
+                    return Err(PlayError::OrchestratorFailed {
                         phase: "planning".to_string(),
                         reason: plan.hard_blocks.join("; "),
                     });
-                    let _ = self.write_checkpoint();
-                    return self.final_error();
                 }
             }
         } else {
@@ -482,12 +543,8 @@ impl Orchestrator {
 
         // Phase 3: Confirmation
         if let Err(e) = self.confirm_phase() {
-            self.last_error = Some(e);
             self.phase = OrchestratorPhase::Failed;
-            return self.final_error();
-        }
-        if self.phase == OrchestratorPhase::Failed {
-            return self.final_error();
+            return Err(e);
         }
         if self.phase == OrchestratorPhase::Planned {
             // User aborted - clean exit without mutation
@@ -497,24 +554,16 @@ impl Orchestrator {
 
         // Phase 4: Execution
         if let Err(e) = self.execute_phase() {
-            self.last_error = Some(e);
             self.phase = OrchestratorPhase::Failed;
             let _ = self.write_checkpoint();
-            return self.final_error();
-        }
-        if self.phase == OrchestratorPhase::Failed {
-            return self.final_error();
+            return Err(e);
         }
 
         // Phase 5: Validation
         if let Err(e) = self.validate_phase() {
-            self.last_error = Some(e);
             self.phase = OrchestratorPhase::Failed;
             let _ = self.write_checkpoint();
-            return self.final_error();
-        }
-        if self.phase == OrchestratorPhase::Failed {
-            return self.final_error();
+            return Err(e);
         }
 
         Ok(())
@@ -570,7 +619,11 @@ impl Orchestrator {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown.exe".to_string()),
-            steam_app_id: None, // Would need Steam integration
+            steam_app_id: std::env::var("SteamAppId")
+                .or_else(|_| std::env::var("STEAM_APP_ID"))
+                .or_else(|_| std::env::var("SteamGameId"))
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok()),
             detected_name: None,
             dx_version: binary.dx_version,
             pe_arch: binary.pe_arch,
@@ -596,6 +649,10 @@ impl Orchestrator {
 
         self.report_progress("Planning configuration...");
         info!(event = "phase_start", phase = "planning", "Starting planning phase");
+
+        if let Some(env) = self.env.as_mut() {
+            env.launch.args = self.launch_args.clone();
+        }
 
         let env = self.env.as_ref().ok_or_else(|| PlayError::OrchestratorFailed {
             phase: "planning".to_string(),
@@ -708,6 +765,33 @@ impl Orchestrator {
 
         self.guards = Some(guards);
 
+        // Persist Class B tweak state so re-runs skip already-applied tweaks.
+        let mut ts = crate::tweak_state::TweakState::load();
+        for t in &tweaks_clone {
+            if let crate::models::plan::TweakDecision::Apply(ref st) = t.decision {
+                use crate::models::plan::SystemTweak;
+                match st {
+                    SystemTweak::VmMaxMapCount { target } => {
+                        ts.record_applied("VmMaxMapCount", &target.to_string());
+                    },
+                    SystemTweak::UlimitNofile { value } => {
+                        ts.record_applied("UlimitNofile", &value.to_string());
+                    },
+                    SystemTweak::ThpMadvise => {
+                        ts.record_applied("ThpMadvise", "madvise");
+                    },
+                    SystemTweak::SchedAutogroup { enabled } => {
+                        ts.record_applied("SchedAutogroup", &enabled.to_string());
+                    },
+                    SystemTweak::SplitLockMitigate { enabled } => {
+                        ts.record_applied("SplitLockMitigate", &enabled.to_string());
+                    },
+                    _ => {},
+                }
+            }
+        }
+        ts.save();
+
         // Record rollback entries for Class B/C tweaks
         self.record_rollback_entries(&tweaks_clone);
 
@@ -715,7 +799,16 @@ impl Orchestrator {
         self.report_progress("Launching game...");
         let launch_module = crate::execution::launch::LaunchModule::new();
         let child = launch_module.execute(&launch_action)?;
+        let pid = child.id();
         self.running_game = Some(child);
+
+        // Persist tracked PID for --stop support.
+        let _ = std::fs::write(self.state_root.join("game.pid"), pid.to_string());
+        if let Some(base) = dirs::data_dir() {
+            let dir = base.join("helix");
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("last_game.pid"), pid.to_string());
+        }
 
         info!(event = "game_spawned", "Game process spawned successfully");
 
@@ -853,7 +946,23 @@ impl Orchestrator {
         })?;
 
         let real_hash = &env.identity.exe_hash;
-        let new_state_root = self.state_root_parent.join(real_hash);
+        let raw_name =
+            env.identity.detected_name.clone().unwrap_or_else(|| env.identity.exe_name.clone());
+        let name = raw_name.trim_end_matches(".exe").trim_end_matches(".EXE").to_string();
+        // sanitize
+        let mut sanitized = String::new();
+        for ch in name.chars() {
+            if ch.is_alphanumeric() {
+                sanitized.push(ch.to_ascii_lowercase());
+            } else if !sanitized.ends_with('-') {
+                sanitized.push('-');
+            }
+        }
+        let sanitized = sanitized.trim_matches('-');
+        let sanitized = if sanitized.is_empty() { "game" } else { sanitized };
+        let short_hash = &real_hash[..8.min(real_hash.len())];
+        let dir_name = format!("{}-{}", sanitized, short_hash);
+        let new_state_root = self.state_root_parent.join(dir_name);
 
         // If already at correct path, nothing to do
         if self.state_root == new_state_root {
@@ -967,7 +1076,13 @@ impl Orchestrator {
                         let prev = self
                             .env
                             .as_ref()
-                            .map(|e| if e.hardware.kernel.split_lock_mitigate { "1".to_string() } else { "0".to_string() })
+                            .map(|e| {
+                                if e.hardware.kernel.split_lock_mitigate {
+                                    "1".to_string()
+                                } else {
+                                    "0".to_string()
+                                }
+                            })
                             .unwrap_or_else(|| "1".to_string());
 
                         self.rollback_manifest.push(RollbackEntry {
@@ -1205,6 +1320,20 @@ impl Orchestrator {
         println!("{}", style("  ").cyan());
         println!("{}  Game: {}", style("").cyan(), plan.env.identity.exe_name);
         println!("{}  Hash: {}", style("").cyan(), plan.env.identity.exe_hash);
+        println!(
+            "{}  Runner: {:?} {}",
+            style("").cyan(),
+            plan.env.runner.runner_type,
+            plan.env.runner.version
+        );
+        println!(
+            "{}  Tweaks: {}",
+            style("").cyan(),
+            plan.tweaks
+                .iter()
+                .filter(|t| matches!(t.decision, crate::models::plan::TweakDecision::Apply(_)))
+                .count()
+        );
         println!();
 
         // Show warnings
@@ -1319,18 +1448,6 @@ impl Orchestrator {
 
         // Vulkan verification is non-blocking - just a warning
         Ok(())
-    }
-
-    /// Return the final error after failure.
-    fn final_error(&mut self) -> Result<(), PlayError> {
-        if let Some(err) = self.last_error.take() {
-            Err(err)
-        } else {
-            Err(PlayError::OrchestratorFailed {
-                phase: format!("{:?}", self.phase),
-                reason: "orchestrator failed".to_string(),
-            })
-        }
     }
 }
 

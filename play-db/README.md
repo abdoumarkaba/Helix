@@ -37,3 +37,13 @@ Edit `runners.toml` to add new GE-Proton releases with SHA256 checksums from the
 ## Validation
 
 All entries are validated against `entry.schema.json` in CI.
+
+## Validation
+
+```bash
+cd play-db
+pip install jsonschema tomli   # tomllib on Python 3.11+
+python3 validate.py
+```
+
+`validate.py` checks every entry under `.entries/` against `entry.schema.json` and verifies `runners.toml` (required fields + 128-hex SHA512, placeholders allowed with a warning). Do not rewrite `validate.py`; extend entries instead.

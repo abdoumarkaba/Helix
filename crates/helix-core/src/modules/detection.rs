@@ -539,7 +539,8 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
                         if parts.len() >= 2 {
                             let major = parts[0].parse::<u64>().unwrap_or(0);
                             let minor = parts[1].parse::<u64>().unwrap_or(0);
-                            let patch = parts.get(2).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+                            let patch =
+                                parts.get(2).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
                             vulkan_version = Some(Version::new(major, minor, patch));
                         }
                     }
@@ -571,8 +572,14 @@ pub fn detect_gpu_vulkaninfo(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
 
     info!(vendor = ?gpu_vendor, model = %gpu_model, method = "vulkaninfo", "gpu detection");
 
-    let vk_12 = vulkan_version.as_ref().map(|v| v.major > 1 || (v.major == 1 && v.minor >= 2)).unwrap_or(false);
-    let vk_13 = vulkan_version.as_ref().map(|v| v.major > 1 || (v.major == 1 && v.minor >= 3)).unwrap_or(false);
+    let vk_12 = vulkan_version
+        .as_ref()
+        .map(|v| v.major > 1 || (v.major == 1 && v.minor >= 2))
+        .unwrap_or(false);
+    let vk_13 = vulkan_version
+        .as_ref()
+        .map(|v| v.major > 1 || (v.major == 1 && v.minor >= 3))
+        .unwrap_or(false);
     let dx12 = if gpu_vendor == GpuVendor::NVIDIA { Some("12_1".to_string()) } else { None };
 
     Some(GpuProfile {
@@ -603,7 +610,10 @@ pub fn detect_gpu_nvidia_smi(cmd_runner: &dyn CommandRunner) -> Option<GpuProfil
     // Query GPU name, VRAM, and driver version
     let output = match cmd_runner.run_command(
         "nvidia-smi",
-        &["--query-gpu=name,memory.total,driver_version,clocks.max.graphics", "--format=csv,noheader,nounits"],
+        &[
+            "--query-gpu=name,memory.total,driver_version,clocks.max.graphics",
+            "--format=csv,noheader,nounits",
+        ],
     ) {
         Ok(out) => out,
         Err(e) => {
@@ -714,7 +724,10 @@ pub fn enrich_nvidia_gpu(
 ) -> Result<(), String> {
     let query_output = match cmd_runner.run_command(
         "nvidia-smi",
-        &["--query-gpu=clocks.max.graphics,memory.total,driver_version", "--format=csv,noheader,nounits"],
+        &[
+            "--query-gpu=clocks.max.graphics,memory.total,driver_version",
+            "--format=csv,noheader,nounits",
+        ],
     ) {
         Ok(output) => output,
         Err(e) => {
@@ -737,7 +750,9 @@ pub fn enrich_nvidia_gpu(
             let driver_str = parts[2].trim();
             if let Ok(version) = Version::parse(driver_str) {
                 gpu.driver_version = version;
-            } else if let Some(major) = driver_str.split('.').next().and_then(|s| s.parse::<u64>().ok()) {
+            } else if let Some(major) =
+                driver_str.split('.').next().and_then(|s| s.parse::<u64>().ok())
+            {
                 gpu.driver_version = Version::new(major, 0, 0);
             }
         }
@@ -802,7 +817,8 @@ pub fn enrich_vulkan_info(gpu: &mut GpuProfile, cmd_runner: &dyn CommandRunner) 
                         if parts.len() >= 2 {
                             let major = parts[0].parse::<u64>().unwrap_or(0);
                             let minor = parts[1].parse::<u64>().unwrap_or(0);
-                            let patch = parts.get(2).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+                            let patch =
+                                parts.get(2).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
                             d.api = Some(Version::new(major, minor, patch));
                         }
                     }
@@ -829,12 +845,8 @@ pub fn enrich_vulkan_info(gpu: &mut GpuProfile, cmd_runner: &dyn CommandRunner) 
 
     // Fallback flat parse.
     if devices.is_empty() {
-        let mut d = VkDevice {
-            name: String::new(),
-            api: None,
-            discrete: false,
-            vendor: gpu.vendor,
-        };
+        let mut d =
+            VkDevice { name: String::new(), api: None, discrete: false, vendor: gpu.vendor };
         for line in output.lines() {
             let t = line.trim();
             if t.contains("deviceName") {

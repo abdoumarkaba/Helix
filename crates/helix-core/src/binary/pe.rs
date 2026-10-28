@@ -138,8 +138,8 @@ fn detect_engine(imports: &[String]) -> Option<GameEngine> {
     None
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(any(test, feature = "test-utils"))]
+pub mod tests {
     use super::*;
     use std::io::Write;
 
@@ -147,7 +147,7 @@ mod tests {
     /// This constructs the absolute minimum PE structure goblin can parse.
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::similar_names)]
-    fn build_minimal_pe32(import_dlls: &[&str]) -> Vec<u8> {
+    pub fn build_minimal_pe32(import_dlls: &[&str]) -> Vec<u8> {
         let mut buf = build_dos_and_pe_headers();
         let (section_rva, import_dir_rva_offset, import_dir_size_offset) =
             add_section_header(&mut buf);
@@ -367,6 +367,7 @@ mod tests {
     }
 
     /// Helper: write PE bytes to a temp file and run analyze_binary on it.
+    #[allow(dead_code)]
     fn analyze_pe_bytes(bytes: &[u8]) -> Result<BinaryAnalysis, PlayError> {
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         let pe_path = dir.path().join("test.exe");
