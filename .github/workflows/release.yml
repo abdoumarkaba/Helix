@@ -21,8 +21,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: v1-glm5.1
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -36,19 +34,20 @@ jobs:
 
       - name: Build binary
         run: |
-          cargo build --release --target ${{ matrix.target }} --bin play
+          cargo build --release --target ${{ matrix.target }} --bin helix
+          cargo build --release --target ${{ matrix.target }} --bin helix-helper
 
       - name: Package binary
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf play-${{ matrix.target }}.tar.gz play
+          tar czf helix-${{ matrix.target }}.tar.gz helix helix-helper ../../../com.github.abdoumarkt.play.policy
           cd -
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v1
         with:
-          name: play-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/play-${{ matrix.target }}.tar.gz
+          name: helix-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/helix-${{ matrix.target }}.tar.gz
 
   release:
     name: Create GitHub Release
@@ -58,15 +57,14 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v1
         with:
           path: artifacts
-          pattern: play-*
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/*/play-*.tar.gz
+          files: artifacts/*/helix-*.tar.gz
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -44,8 +44,8 @@ fi
 # Download and extract
 TMP_DIR=$(mktemp -d)
 cd "$TMP_DIR"
-curl -fsSL "$DOWNLOAD_URL" -o play.tar.gz
-tar xzf play.tar.gz
+curl -fsSL "$DOWNLOAD_URL" -o helix.tar.gz
+tar xzf helix.tar.gz
 
 # Install main binary
 echo "Installing to ${INSTALL_DIR}/helix..."
