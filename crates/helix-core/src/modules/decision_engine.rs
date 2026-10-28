@@ -178,6 +178,12 @@ impl DecisionEngine {
                 .collect();
             if cachy_candidates.is_empty() {
                 RunnerType::ProtonGE
+            } else if runner_installed_locally(RunnerType::ProtonCachyOS) {
+                RunnerType::ProtonCachyOS
+            } else if runner_installed_locally(RunnerType::ProtonGE) {
+                // Prefer a runner the user already has installed over downloading
+                // a new one, even if the manifest advertises Proton CachyOS.
+                RunnerType::ProtonGE
             } else {
                 RunnerType::ProtonCachyOS
             }
@@ -682,6 +688,58 @@ impl DecisionEngine {
             },
         }
     }
+}
+
+/// Returns true if a runner of the given type is already installed locally,
+/// either in Helix's own runners directory or in Steam's compatibility tools.
+fn runner_installed_locally(runner_type: RunnerType) -> bool {
+    // Helix's own install roots.
+    let roots = [
+        dirs::data_dir().map(|d| d.join("helix").join("runners")),
+        dirs::data_dir().map(|d| d.join("play").join("runners")),
+    ];
+    for root in roots.into_iter().flatten() {
+        let dir_name = match runner_type {
+            RunnerType::ProtonGE => "ProtonGE",
+            RunnerType::ProtonCachyOS => "ProtonCachyOS",
+            _ => continue,
+        };
+        let base = root.join(dir_name);
+        if base.exists() {
+            return true;
+        }
+    }
+
+    // Steam compatibility tools.
+    if let Some(home) = dirs::home_dir() {
+        let compat_dirs = [
+            home.join(".steam/steam/compatibilitytools.d"),
+            home.join(".local/share/Steam/compatibilitytools.d"),
+        ];
+        for compat_dir in compat_dirs {
+            if let Ok(entries) = std::fs::read_dir(&compat_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() || !path.join("proton").exists() {
+                        continue;
+                    }
+                    let name = entry.file_name().to_string_lossy().to_lowercase();
+                    let is_ge = name.starts_with("ge-proton") || name.starts_with("ge_proton");
+                    let is_cachy = name.contains("cachy") && name.contains("proton");
+                    let matches = match runner_type {
+                        RunnerType::ProtonGE => is_ge,
+                        RunnerType::ProtonCachyOS => is_cachy,
+                        _ => false,
+                    };
+                    if matches {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
