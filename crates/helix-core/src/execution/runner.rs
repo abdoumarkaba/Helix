@@ -61,14 +61,17 @@ fn check_disk_space(path: &Path) -> Result<u64, PlayError> {
     }
 
     // Use df to get available space
-    let output = Command::new("df")
+    let output = match Command::new("df")
         .args(["-B1", "--output=avail", path.display().to_string().as_str()])
         .output()
-        .map_err(|e| PlayError::RunnerDownload {
-            url: String::new(),
-            attempt: 1,
-            reason: format!("Failed to check disk space: {e}"),
-        })?;
+    {
+        Ok(o) => o,
+        Err(_) => {
+            // `df` may be unavailable on minimal systems; skip the check rather
+            // than blocking the download entirely.
+            return Ok(u64::MAX);
+        },
+    };
 
     let available: u64 = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -167,7 +170,13 @@ impl RunnerModule {
                 Self::verify_checksum(&archive_path, sha512)?;
 
                 // Extract
-                Self::extract(&archive_path, &self.runners_install_root)?;
+                if let Err(e) = Self::extract(&archive_path, &self.runners_install_root) {
+                    // Remove any partially-extracted install directory so a future
+                    // run does not mistake it for a complete installation.
+                    let _ = fs::remove_dir_all(&install_path);
+                    let _ = fs::remove_file(&archive_path);
+                    return Err(e);
+                }
 
                 // Clean up archive
                 if let Err(e) = fs::remove_file(&archive_path) {
