@@ -85,4 +85,19 @@ pub enum PlayError {
 
     #[error("Failed to launch game at {exe_path}: {reason}")]
     GameLaunchFailed { exe_path: PathBuf, reason: String },
+
+    #[error("Failed to read play-db entry at {path}: {reason}")]
+    DbEntryReadFailed { path: PathBuf, reason: String },
+
+    #[error("play-db entry for {hash} is corrupted: {reason}")]
+    DatabaseCorrupted { hash: String, reason: String },
+
+    #[error("play-db runners manifest missing at {path}")]
+    RunnersManifestMissing { path: PathBuf },
+
+    #[error("Failed to read play-db runners manifest at {path}: {reason}")]
+    RunnersManifestReadFailed { path: PathBuf, reason: String },
+
+    #[error("Failed to parse play-db runners manifest at {path}: {reason}")]
+    RunnersManifestParseFailed { path: PathBuf, reason: String },
 }

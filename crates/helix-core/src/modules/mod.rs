@@ -1,3 +1,4 @@
+pub mod database_client;
 pub mod decision_engine;
 pub mod detection;
 pub mod package_manager;

@@ -11,6 +11,7 @@ fn planning_module() -> PlanningModule {
     PlanningModule::new(
         PathBuf::from("/tmp/play-test-runners"),
         PathBuf::from("/tmp/play-test-prefixes"),
+        None,
     )
 }
 

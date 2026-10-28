@@ -659,7 +659,24 @@ impl Orchestrator {
             reason: "no environment in planning phase".to_string(),
         })?;
 
-        let planning = PlanningModule::new(self.runners_root.clone(), self.prefix_root.clone());
+        let _ = self.fetch_database();
+
+        // Prefer a local play-db cache when available; fall back to defaults.
+        let db_root = Self::db_root();
+        let reader: Box<dyn crate::modules::database_client::DatabaseReader> =
+            if db_root.join("runners.toml").exists() {
+                Box::new(crate::modules::database_client::DatabaseClient::new(db_root))
+            } else {
+                Box::new(crate::modules::database_client::NoopDatabaseReader::with_manifest(
+                    crate::modules::runner_manifest::get_default_manifest(),
+                ))
+            };
+
+        let planning = PlanningModule::new(
+            self.runners_root.clone(),
+            self.prefix_root.clone(),
+            Some(reader),
+        );
 
         let plan = planning.plan(env)?;
 
@@ -671,12 +688,31 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// NOTE: Disabled for local testing
-    /// Fetch the play-db database from GitHub.
+    /// Validate the local play-db cache (no network access at launch time).
     #[allow(dead_code)]
     fn fetch_database(&self) -> Result<(), PlayError> {
-        // TODO: Re-enable when play-db is ready
+        let root = Self::db_root();
+        if !root.exists() {
+            return Ok(());
+        }
+        // Validate that runners.toml parses if present; ignore failures.
+        let client = crate::modules::database_client::DatabaseClient::new(root);
+        let _ = crate::modules::database_client::DatabaseReader::load_runners_manifest(&client);
         Ok(())
+    }
+
+    /// Resolve the play-db root, preferring helix/db with a legacy play/db fallback.
+    fn db_root() -> PathBuf {
+        let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share"));
+        let helix = base.join("helix").join("db");
+        if helix.exists() {
+            return helix;
+        }
+        let legacy = base.join("play").join("db");
+        if legacy.exists() {
+            return legacy;
+        }
+        helix
     }
 
     /// Confirmation phase: display plan and get user approval.

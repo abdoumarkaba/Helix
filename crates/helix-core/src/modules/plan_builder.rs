@@ -27,6 +27,7 @@ pub struct PlanBuilder<'a> {
     manifest: &'a RunnersManifest,
     prefix_root: PathBuf,
     runners_install_root: PathBuf,
+    db_entry: Option<crate::models::plan::DbEntry>,
 }
 
 impl<'a> PlanBuilder<'a> {
@@ -35,8 +36,9 @@ impl<'a> PlanBuilder<'a> {
         manifest: &'a RunnersManifest,
         prefix_root: PathBuf,
         runners_install_root: PathBuf,
+        db_entry: Option<crate::models::plan::DbEntry>,
     ) -> Self {
-        Self { env, manifest, prefix_root, runners_install_root }
+        Self { env, manifest, prefix_root, runners_install_root, db_entry }
     }
 
     /// Build the GamePlan. Pure: no filesystem writes, no system calls.
@@ -94,11 +96,16 @@ impl<'a> PlanBuilder<'a> {
 
         // --- 6. Runner ---
         info!("Selecting runner...");
-        let db_hit = false; // No play-db in local mode
+        let db_hit = self.db_entry.is_some();
+        let db_runner_type_override =
+            self.db_entry.as_ref().and_then(|e| e.runner_type_override);
+        let db_version_floor = self.db_entry.as_ref().and_then(|e| e.runner_version_min.clone());
         let (runner_type, runner_version, dec) = DecisionEngine::select_runner(
             &self.env.identity.anti_cheat,
             self.manifest,
             &self.env.identity,
+            db_runner_type_override,
+            db_version_floor,
         )?;
         info!("Runner: {:?} {}", runner_type, runner_version);
         decisions.push(dec);
@@ -136,8 +143,13 @@ impl<'a> PlanBuilder<'a> {
         let (prefix_arch, dec) = DecisionEngine::select_prefix_arch(self.env.identity.pe_arch);
         decisions.push(dec);
 
-        let (windows_version, dec) =
+        let (mut windows_version, dec) =
             DecisionEngine::select_windows_version(self.env.identity.dx_version);
+        if let Some(entry) = &self.db_entry {
+            if let Some(wv) = entry.windows_version_override {
+                windows_version = wv;
+            }
+        }
         info!("Prefix: {:?}, Windows: {:?}", prefix_arch, windows_version);
         decisions.push(dec);
 
@@ -185,7 +197,16 @@ impl<'a> PlanBuilder<'a> {
         env.prefix.arch = prefix_arch;
         env.prefix.windows_version = windows_version;
 
-        // No play-db integration - use heuristic defaults only
+        // Apply play-db entry overrides (roadmap item 27).
+        if let Some(entry) = &self.db_entry {
+            env.prefix.dll_overrides = entry.dll_overrides.clone();
+            for (k, v) in &entry.extra_env_vars {
+                env.launch.env.insert(k.clone(), v.clone());
+            }
+            if let Some(notes) = &entry.notes {
+                warnings.push(PlanWarning { message: notes.clone(), install_hint: None });
+            }
+        }
 
         // Fill system tuning
         for t in &tweaks {
