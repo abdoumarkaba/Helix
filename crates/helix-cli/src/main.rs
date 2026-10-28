@@ -1050,6 +1050,10 @@ fn main() {
             style("Fast launch:").cyan(),
             style(checkpoint_path.display()).dim()
         );
+        println!(
+            "  {} Reusing saved DXVK cache; shader compilation skipped.",
+            style("Fast launch:").cyan()
+        );
 
         match orchestrator.fast_launch() {
             Ok(pid) => {

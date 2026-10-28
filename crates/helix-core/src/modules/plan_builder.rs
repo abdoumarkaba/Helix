@@ -76,6 +76,14 @@ impl<'a> PlanBuilder<'a> {
         info!("DXVK async: {} (cache path: {})", async_compile, cache_path.display());
         decisions.push(dec);
 
+        // Roadmap item 25: first-run shader-compile UX.
+        if !cache_path.exists() {
+            warnings.push(PlanWarning {
+                message: "First run: DXVK shader cache not found. Expect shader-compile stutter for the first few minutes; later runs reuse the cache.".to_owned(),
+                install_hint: Some(format!("Cache will be written to {}", cache_path.display())),
+            });
+        }
+
         // --- 6. Runner ---
         info!("Selecting runner...");
         let db_hit = false; // No play-db in local mode
