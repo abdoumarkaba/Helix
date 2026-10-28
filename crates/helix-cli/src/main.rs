@@ -927,39 +927,37 @@ fn main() {
 
                 let mut lines: Vec<String> = Vec::new();
                 lines.push(ui::kv("Game", &plan.env.identity.exe_name));
-                lines.push(ui::kv("Path", &plan.env.identity.exe_path.display().to_string()));
+                lines.push(ui::kv("Path", plan.env.identity.exe_path.display().to_string()));
                 lines.push(ui::kv("Hash", &plan.env.identity.exe_hash));
                 lines.push(ui::kv(
                     "Runner",
-                    &format!("{:?} {}", plan.env.runner.runner_type, plan.env.runner.version),
+                    format!("{:?} {}", plan.env.runner.runner_type, plan.env.runner.version),
                 ));
 
                 match &plan.runner_action {
                     helix_core::models::plan::RunnerAction::AlreadyInstalled { path } => {
                         lines.push(ui::kv(
                             "Runner action",
-                            &format!("already installed ({})", path.display()),
+                            format!("already installed ({})", path.display()),
                         ));
                     },
                     helix_core::models::plan::RunnerAction::Download { version, .. } => {
-                        lines.push(ui::kv("Runner action", &format!("download {}", version)));
+                        lines.push(ui::kv("Runner action", format!("download {}", version)));
                         lines.push(ui::kv("Download size", "~1.5 GB"));
                     },
                 }
 
                 match &plan.prefix_action {
                     helix_core::models::plan::PrefixAction::AlreadyExists { path } => {
-                        lines.push(ui::kv(
-                            "Prefix",
-                            &format!("already exists ({})", path.display()),
-                        ));
+                        lines
+                            .push(ui::kv("Prefix", format!("already exists ({})", path.display())));
                     },
                     helix_core::models::plan::PrefixAction::Create { path, .. } => {
-                        lines.push(ui::kv("Prefix", &format!("create ({})", path.display())));
+                        lines.push(ui::kv("Prefix", format!("create ({})", path.display())));
                     },
                 }
 
-                lines.push(ui::kv("Tweaks", &applied.to_string()));
+                lines.push(ui::kv("Tweaks", applied.to_string()));
                 for t in &plan.tweaks {
                     if let helix_core::models::plan::TweakDecision::Apply(ref st) = t.decision {
                         lines.push(format!("    · {:?}: {:?}", t.id, st));

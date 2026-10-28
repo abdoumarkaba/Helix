@@ -260,7 +260,7 @@ pub mod tests {
     }
 
     /// Finalize headers and return section data start position.
-    fn finalize_headers(buf: &mut Vec<u8>) -> usize {
+    fn finalize_headers(buf: &mut [u8]) -> usize {
         let size_of_headers_offset = 0x94; // SizeOfHeaders in optional header
         let size_of_headers = buf.len() as u32;
         buf[size_of_headers_offset..size_of_headers_offset + 4]
@@ -328,7 +328,7 @@ pub mod tests {
 
     /// Fix up header values with final section information.
     fn fixup_header_values(
-        buf: &mut Vec<u8>,
+        buf: &mut [u8],
         section_rva: u32,
         section_data_start: usize,
         import_dir_rva_offset: usize,
