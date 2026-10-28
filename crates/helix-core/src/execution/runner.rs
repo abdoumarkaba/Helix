@@ -245,6 +245,24 @@ impl RunnerModule {
 
         pb.set_message(format!("Downloading {}", url.split('/').next_back().unwrap_or("file")));
 
+        // Optional GUI progress dialog (zenity preferred). Falls back silently
+        // to the terminal progress bar when no supported tool is available.
+        let mut gui_child = if detect_gui_progress_tool() == Some("zenity") {
+            use std::process::{Command, Stdio};
+            let mut cmd = Command::new("zenity");
+            cmd.args(["--progress", "--title=Helix", "--text=Downloading runner...", "--auto-close"]);
+            if total_bytes.is_none() {
+                cmd.arg("--pulsate");
+            }
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()
+        } else {
+            None
+        };
+
         let mut reader = response.into_reader();
         let mut file = fs::File::create(dest).map_err(|e| format!("failed to create file: {e}"))?;
 
@@ -259,9 +277,27 @@ impl RunnerModule {
             file.write_all(&buf[..n]).map_err(|e| format!("write error: {e}"))?;
             downloaded += n as u64;
             pb.set_position(downloaded);
+
+            if let Some(child) = gui_child.as_mut() {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use std::io::Write;
+                    if let Some(total) = total_bytes {
+                        let pct = (downloaded.saturating_mul(100) / total).min(100);
+                        let _ = writeln!(stdin, "{}", pct);
+                    } else {
+                        let _ = writeln!(stdin);
+                    }
+                    let _ = stdin.flush();
+                }
+            }
         }
 
         file.flush().map_err(|e| format!("flush error: {e}"))?;
+
+        if let Some(mut child) = gui_child.take() {
+            drop(child.stdin.take());
+            let _ = child.wait();
+        }
 
         pb.finish_with_message("Download complete");
         Ok(())
