@@ -161,22 +161,29 @@ impl DecisionEngine {
         _anti_cheat: &[AntiCheat],
         manifest: &RunnersManifest,
         identity: &GameIdentity,
+        db_runner_type_override: Option<RunnerType>,
+        db_version_floor: Option<Version>,
     ) -> Result<(RunnerType, Version, ResolutionDecision), PlayError> {
-        // Default to Proton CachyOS 11 when available in the manifest — more
-        // reliable on this system than GE-Proton. Fall back to ProtonGE for
-        // manifests that only provide GE-Proton releases.
-        let cachy_candidates: Vec<&crate::models::plan::RunnerRelease> = manifest
-            .runners
-            .iter()
-            .filter(|r| r.runner_type == RunnerType::ProtonCachyOS)
-            .collect();
-        let runner_type = if cachy_candidates.is_empty() {
-            RunnerType::ProtonGE
+        // play-db override takes precedence when present.
+        let runner_type = if let Some(rt) = db_runner_type_override {
+            rt
         } else {
-            RunnerType::ProtonCachyOS
+            // Default to Proton CachyOS 11 when available in the manifest — more
+            // reliable on this system than GE-Proton. Fall back to ProtonGE for
+            // manifests that only provide GE-Proton releases.
+            let cachy_candidates: Vec<&crate::models::plan::RunnerRelease> = manifest
+                .runners
+                .iter()
+                .filter(|r| r.runner_type == RunnerType::ProtonCachyOS)
+                .collect();
+            if cachy_candidates.is_empty() {
+                RunnerType::ProtonGE
+            } else {
+                RunnerType::ProtonCachyOS
+            }
         };
 
-        let version_floor: Option<Version> = None;
+        let version_floor: Option<Version> = db_version_floor;
 
         let candidates: Vec<&crate::models::plan::RunnerRelease> = manifest
             .runners
@@ -1208,7 +1215,7 @@ mod tests {
         let manifest = RunnersManifest { runners: vec![] };
         let identity = make_identity();
 
-        let result = DecisionEngine::select_runner(&[], &manifest, &identity);
+        let result = DecisionEngine::select_runner(&[], &manifest, &identity, None, None);
         assert!(
             matches!(result, Err(PlayError::NoRunnerAvailable { .. })),
             "expected NoRunnerAvailable on empty manifest, got: {result:?}"

@@ -672,11 +672,8 @@ impl Orchestrator {
                 ))
             };
 
-        let planning = PlanningModule::new(
-            self.runners_root.clone(),
-            self.prefix_root.clone(),
-            Some(reader),
-        );
+        let planning =
+            PlanningModule::new(self.runners_root.clone(), self.prefix_root.clone(), Some(reader));
 
         let plan = planning.plan(env)?;
 

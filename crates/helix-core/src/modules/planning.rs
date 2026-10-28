@@ -35,7 +35,9 @@ impl PlanningModule {
     /// Plan execution for the given game environment.
     pub fn plan(&self, env: &GameEnvironment) -> Result<GamePlan, PlayError> {
         let (manifest, db_entry) = if let Some(reader) = &self.db_reader {
-            let manifest = reader.load_runners_manifest().unwrap_or_else(|_| runner_manifest::get_default_manifest());
+            let manifest = reader
+                .load_runners_manifest()
+                .unwrap_or_else(|_| runner_manifest::get_default_manifest());
             let entry = reader.lookup(&env.identity.exe_hash).unwrap_or(None);
             (manifest, entry)
         } else {

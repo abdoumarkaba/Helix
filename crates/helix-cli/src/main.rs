@@ -432,7 +432,8 @@ fn review_mangohud_logs(show_trend: bool) -> Result<(), PlayError> {
         let trends = helix_core::models::metrics::aggregate_trends(&trend_summaries, 5);
         println!("\n{}", style("FPS Trends (last 5 runs per game)").green().bold());
         for t in trends {
-            let delta = t.delta_pct.map(|d| format!("{:+.1}%", d)).unwrap_or_else(|| "n/a".to_string());
+            let delta =
+                t.delta_pct.map(|d| format!("{:+.1}%", d)).unwrap_or_else(|| "n/a".to_string());
             println!(
                 "  {} — runs: {}, avg FPS (last 5): {:.1}, delta: {}",
                 style(&t.game).bold(),

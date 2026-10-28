@@ -97,8 +97,7 @@ impl<'a> PlanBuilder<'a> {
         // --- 6. Runner ---
         info!("Selecting runner...");
         let db_hit = self.db_entry.is_some();
-        let db_runner_type_override =
-            self.db_entry.as_ref().and_then(|e| e.runner_type_override);
+        let db_runner_type_override = self.db_entry.as_ref().and_then(|e| e.runner_type_override);
         let db_version_floor = self.db_entry.as_ref().and_then(|e| e.runner_version_min.clone());
         let (runner_type, runner_version, dec) = DecisionEngine::select_runner(
             &self.env.identity.anti_cheat,
