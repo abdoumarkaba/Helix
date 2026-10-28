@@ -360,6 +360,8 @@ impl Orchestrator {
 
     /// Plan only: run detection + planning, return plan without confirmation/execution.
     pub fn plan_only(&mut self, exe_path: &Path) -> Result<&GamePlan, PlayError> {
+        // Ensure state directory exists (mirrors run())
+        let _ = std::fs::create_dir_all(&self.state_root);
         // Detection
         if self.phase < OrchestratorPhase::Detected {
             if let Err(e) = self.detect(exe_path) {
@@ -1345,44 +1347,66 @@ impl Orchestrator {
 
     /// Interactive confirmation using dialoguer.
     fn interactive_confirm(&self, plan: &GamePlan) -> Result<bool, PlayError> {
-        use console::style;
+        use console::{measure_text_width, style, Term};
 
-        // Display plan summary
-        println!();
-        println!("{}", style("  PLAY PLAN").bold().cyan());
-        println!("{}", style("  ").cyan());
-        println!("{}  Game: {}", style("").cyan(), plan.env.identity.exe_name);
-        println!("{}  Hash: {}", style("").cyan(), plan.env.identity.exe_hash);
-        println!(
-            "{}  Runner: {:?} {}",
-            style("").cyan(),
+        let applied = plan
+            .tweaks
+            .iter()
+            .filter(|t| matches!(t.decision, crate::models::plan::TweakDecision::Apply(_)))
+            .count();
+
+        let mut lines: Vec<String> = Vec::new();
+        lines.push(format!("  {:<14} {}", style("Game").dim(), plan.env.identity.exe_name));
+        lines.push(format!("  {:<14} {}", style("Hash").dim(), plan.env.identity.exe_hash));
+        lines.push(format!(
+            "  {:<14} {:?} {}",
+            style("Runner").dim(),
             plan.env.runner.runner_type,
             plan.env.runner.version
-        );
-        println!(
-            "{}  Tweaks: {}",
-            style("").cyan(),
-            plan.tweaks
-                .iter()
-                .filter(|t| matches!(t.decision, crate::models::plan::TweakDecision::Apply(_)))
-                .count()
-        );
-        println!();
+        ));
+        lines.push(format!("  {:<14} {}", style("Tweaks").dim(), applied));
 
-        // Show warnings
         for warning in &plan.warnings {
-            println!("{} {}", style("  WARNING:").yellow(), warning.message);
-        }
-        if !plan.warnings.is_empty() {
-            println!();
+            lines.push(format!("  {} {}", style("⚠").yellow().bold(), warning.message));
+            if let Some(h) = &warning.install_hint {
+                lines.push(format!("      Hint: {}", h));
+            }
         }
 
-        // Show tweaks
-        println!("{}", style("  System Changes:").cyan());
+        lines.push(format!("{}", style("  System Changes:").magenta().bold()));
         for tweak in &plan.tweaks {
             if let crate::models::plan::TweakDecision::Apply(ref sys_tweak) = tweak.decision {
-                println!("    {} {:?}: {:?}", style("·").cyan(), tweak.id, sys_tweak);
+                lines.push(format!("    {} {:?}: {:?}", style("·").magenta(), tweak.id, sys_tweak));
             }
+        }
+
+        // Render a rounded card (same layout as CLI ui::card).
+        let term_width = Term::stdout().size().1 as usize;
+        let width = if term_width == 0 { 80 } else { term_width };
+        if width < 60 {
+            println!();
+            println!("{}", style("PLAN").bold().magenta());
+            for l in &lines {
+                println!("{}", l);
+            }
+        } else {
+            let w = width.min(72);
+            let title = "PLAN";
+            let title_len = measure_text_width(title);
+            let fill = if w >= title_len + 5 { w - title_len - 5 } else { 0 };
+            println!();
+            println!("╭─ {} {}╮", style(title).bold().magenta(), "─".repeat(fill));
+            let inner = w.saturating_sub(4);
+            for l in &lines {
+                let tw = measure_text_width(l);
+                if tw <= inner {
+                    let pad = inner - tw;
+                    println!("│ {}{} │", l, " ".repeat(pad));
+                } else {
+                    println!("│ {} │", l);
+                }
+            }
+            println!("╰{}╯", "─".repeat(w.saturating_sub(2)));
         }
         println!();
 

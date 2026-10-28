@@ -26,7 +26,7 @@ use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use console::{style, Term};
 use dirs::data_dir;
-use indicatif::{ProgressBar, ProgressStyle};
+
 use serde_json::Value as JsonValue;
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
@@ -38,6 +38,8 @@ use helix_core::models::metrics::SessionMetrics;
 use helix_core::modules::detection::RealCommandRunner;
 use helix_core::modules::validation::FpsMetrics;
 use helix_core::orchestrator::{Orchestrator, OrchestratorPhase};
+
+mod ui;
 
 // ---------------------------------------------------------------------------
 // CLI Arguments
@@ -194,130 +196,101 @@ fn display_error_with_context(
     log_path: &Path,
     rollback_entries: &[helix_core::orchestrator::RollbackEntry],
 ) {
-    eprintln!("\n  {} {}", style("Error:").red().bold(), error);
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("{}", error));
 
     // Extract error-specific context
     let error_context = match error {
-        PlayError::RunnerDownload { url, attempt, reason } => {
-            Some(format!("  URL: {}\n  Attempt: {}/3\n  Reason: {}", url, attempt, reason))
-        },
+        PlayError::RunnerDownload { url, attempt, reason } => Some(vec![
+            ui::kv("URL", url),
+            ui::kv("Attempt", format!("{}/3", attempt)),
+            ui::kv("Reason", reason),
+        ]),
         PlayError::PackageInstall { pm, package, .. } => {
-            Some(format!("  Package manager: {}\n  Package: {}", pm, package))
+            Some(vec![ui::kv("Package manager", pm), ui::kv("Package", package)])
         },
         PlayError::GameCrash { seconds, .. } => {
-            Some(format!("  Crashed after: {} seconds", seconds))
+            Some(vec![ui::kv("Crashed after", format!("{} seconds", seconds))])
         },
         PlayError::GameLaunchFailed { exe_path, reason } => {
-            Some(format!("  Executable: {}\n  Reason: {}", exe_path.display(), reason))
+            Some(vec![ui::kv("Executable", exe_path.display()), ui::kv("Reason", reason)])
         },
         _ => None,
     };
 
     if let Some(ctx) = error_context {
-        eprintln!("{}", ctx);
+        for c in ctx {
+            lines.push(c);
+        }
     }
 
     // Show rollback information if any
     if !rollback_entries.is_empty() {
-        eprintln!("\n  {}", style("Rollback completed:").yellow().bold());
+        lines.push(ui::status_warn("Rollback completed:"));
         for entry in rollback_entries {
-            eprintln!("    · Restored {}: {}", entry.key, entry.previous_value);
+            lines.push(format!("    · Restored {}: {}", entry.key, entry.previous_value));
         }
     }
 
     // Provide next steps based on error type
-    eprintln!("\n  {}", style("Next steps:").cyan().bold());
+    lines.push(ui::section("Next steps"));
+    let steps: Vec<String> = match error {
+        PlayError::RunnerDownload { .. } => vec![
+            "Check your internet connection".to_string(),
+            "Verify the runner URL is accessible".to_string(),
+            format!("Check the log file for details: {}", log_path.display()),
+            format!("Try again: play {}", exe_path.display()),
+            format!("Or rollback: play --undo {}", exe_path.display()),
+        ],
+        PlayError::PackageInstall { .. } => vec![
+            "Check if package manager is working".to_string(),
+            "Try installing manually with your package manager".to_string(),
+            format!("Check the log file for details: {}", log_path.display()),
+            format!("Try again: play {}", exe_path.display()),
+            format!("Or rollback: play --undo {}", exe_path.display()),
+        ],
+        PlayError::GameCrash { .. } => vec![
+            format!("Check the log file for details: {}", log_path.display()),
+            format!("Run play --report {} to file a crash report", exe_path.display()),
+            "Try running with different compatibility settings".to_string(),
+        ],
+        PlayError::ValidationFailed { .. } => vec![
+            "Check if game process is still running".to_string(),
+            "Verify GPU drivers are installed and working".to_string(),
+            format!("Check the log file for details: {}", log_path.display()),
+            format!("Run play --report {} to file a report", exe_path.display()),
+        ],
+        PlayError::NoRunnerAvailable { .. } => vec![
+            "Check that ProtonGE runners are installed".to_string(),
+            "Install required tools (pciutils, vulkan-tools)".to_string(),
+            format!("Check the log file for details: {}", log_path.display()),
+            "Try a different game or check runner compatibility".to_string(),
+        ],
+        PlayError::UnsupportedDistro { .. } => vec![
+            "Check if your distro is supported".to_string(),
+            "Try running on a supported distro (Ubuntu 22.04+, Fedora 38+, Arch, Debian 12+)"
+                .to_string(),
+            format!("Check the log file for details: {}", log_path.display()),
+        ],
+        PlayError::InsufficientVram { .. } => vec![
+            "Close other applications to free VRAM".to_string(),
+            "Lower game graphics settings".to_string(),
+            "Consider upgrading your GPU".to_string(),
+            format!("Check the log file for details: {}", log_path.display()),
+        ],
+        _ => vec![
+            format!("Check the log file for details: {}", log_path.display()),
+            format!("Try again: play {}", exe_path.display()),
+            format!("Or rollback: play --undo {}", exe_path.display()),
+        ],
+    };
 
-    match error {
-        PlayError::RunnerDownload { .. } => {
-            eprintln!("    1. Check your internet connection");
-            eprintln!("    2. Verify the runner URL is accessible");
-            eprintln!(
-                "    3. Check the log file for details: {}",
-                style(log_path.display()).cyan()
-            );
-            eprintln!("    4. Try again: {}", style(format!("play {}", exe_path.display())).cyan());
-            eprintln!(
-                "    5. Or rollback: {}",
-                style(format!("play --undo {}", exe_path.display())).cyan()
-            );
-        },
-        PlayError::PackageInstall { .. } => {
-            eprintln!("    1. Check if package manager is working");
-            eprintln!("    2. Try installing manually with your package manager");
-            eprintln!(
-                "    3. Check the log file for details: {}",
-                style(log_path.display()).cyan()
-            );
-            eprintln!("    4. Try again: {}", style(format!("play {}", exe_path.display())).cyan());
-            eprintln!(
-                "    5. Or rollback: {}",
-                style(format!("play --undo {}", exe_path.display())).cyan()
-            );
-        },
-        PlayError::GameCrash { .. } => {
-            eprintln!(
-                "    1. Check the log file for details: {}",
-                style(log_path.display()).cyan()
-            );
-            eprintln!(
-                "    2. Run {} to file a crash report",
-                style(format!("play --report {}", exe_path.display())).cyan()
-            );
-            eprintln!("    3. Try running with different compatibility settings");
-        },
-        PlayError::ValidationFailed { .. } => {
-            eprintln!("    1. Check if game process is still running");
-            eprintln!("    2. Verify GPU drivers are installed and working");
-            eprintln!(
-                "    3. Check the log file for details: {}",
-                style(log_path.display()).cyan()
-            );
-            eprintln!(
-                "    4. Run {} to file a report",
-                style(format!("play --report {}", exe_path.display())).cyan()
-            );
-        },
-        PlayError::NoRunnerAvailable { .. } => {
-            eprintln!("    1. Check that ProtonGE runners are installed");
-            eprintln!("    2. Install required tools (pciutils, vulkan-tools)");
-            eprintln!(
-                "    3. Check the log file for details: {}",
-                style(log_path.display()).cyan()
-            );
-            eprintln!("    4. Try a different game or check runner compatibility");
-        },
-        PlayError::UnsupportedDistro { .. } => {
-            eprintln!("    1. Check if your distro is supported");
-            eprintln!("    2. Try running on a supported distro (Ubuntu 22.04+, Fedora 38+, Arch, Debian 12+)");
-            eprintln!(
-                "    3. Check the log file for details: {}",
-                style(log_path.display()).cyan()
-            );
-        },
-        PlayError::InsufficientVram { .. } => {
-            eprintln!("    1. Close other applications to free VRAM");
-            eprintln!("    2. Lower game graphics settings");
-            eprintln!("    3. Consider upgrading your GPU");
-            eprintln!(
-                "    4. Check the log file for details: {}",
-                style(log_path.display()).cyan()
-            );
-        },
-        _ => {
-            eprintln!(
-                "    1. Check the log file for details: {}",
-                style(log_path.display()).cyan()
-            );
-            eprintln!("    2. Try again: {}", style(format!("play {}", exe_path.display())).cyan());
-            eprintln!(
-                "    3. Or rollback: {}",
-                style(format!("play --undo {}", exe_path.display())).cyan()
-            );
-        },
+    for (i, s) in steps.iter().enumerate() {
+        lines.push(format!("    {}. {}", i + 1, s));
     }
 
-    // Log file path was already printed at startup
+    eprintln!();
+    eprintln!("{}", ui::card("ERROR", &lines));
 }
 
 /// Show log file location at end of run
@@ -374,11 +347,7 @@ fn review_mangohud_logs(show_trend: bool) -> Result<(), PlayError> {
         b_time.cmp(&a_time)
     });
 
-    println!(
-        "{} Found {} MangoHud log file(s)",
-        style("MangoHud Logs:").green().bold(),
-        log_files.len()
-    );
+    println!("{} Found {} MangoHud log file(s)", ui::section("MangoHud Logs:"), log_files.len());
     println!();
 
     let mut trend_summaries: Vec<helix_core::models::metrics::SessionSummary> = Vec::new();
@@ -432,7 +401,7 @@ fn review_mangohud_logs(show_trend: bool) -> Result<(), PlayError> {
 
     if show_trend && !trend_summaries.is_empty() {
         let trends = helix_core::models::metrics::aggregate_trends(&trend_summaries, 5);
-        println!("\n{}", style("FPS Trends (last 5 runs per game)").green().bold());
+        println!("\n{}", ui::section("FPS Trends (last 5 runs per game)"));
         for t in trends {
             let delta =
                 t.delta_pct.map(|d| format!("{:+.1}%", d)).unwrap_or_else(|| "n/a".to_string());
@@ -478,12 +447,12 @@ fn review_mangohud_logs(show_trend: bool) -> Result<(), PlayError> {
 fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
     let file_name = log_path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
 
-    println!("\n{} {}", style("Reviewing:").cyan().bold(), style(file_name).bold());
+    println!("\n{} {}", ui::section("Reviewing"), style(file_name).bold());
     println!("{}", style("─".repeat(60)).dim());
 
     let session = MangoHudParser::parse_csv(log_path, file_name.to_string())?;
 
-    println!("\n{}", style("Session Summary").green().bold());
+    println!("\n{}", ui::section("Session Summary"));
     println!("  Game: {}", session.game_name);
     println!("  Started: {}", session.started_at.format("%Y-%m-%d %H:%M:%S UTC"));
     if let Some(ended) = session.ended_at {
@@ -494,7 +463,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
 
     // Print FPS statistics
     if let Some(ref fps) = session.fps_stats {
-        println!("\n{}", style("FPS Statistics").green().bold());
+        println!("\n{}", ui::section("FPS Statistics"));
         println!("  Average: {:.2}", fps.avg);
         println!("  Minimum: {:.2}", fps.min);
         println!("  Maximum: {:.2}", fps.max);
@@ -504,7 +473,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
 
     // Print frametime statistics
     if let Some(ref ft) = session.frametime_stats {
-        println!("\n{}", style("Frametime Statistics").green().bold());
+        println!("\n{}", ui::section("Frametime Statistics"));
         println!("  Average: {:.2} ms", ft.avg);
         println!("  Minimum: {:.2} ms", ft.min);
         println!("  Maximum: {:.2} ms", ft.max);
@@ -514,7 +483,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
 
     // Print CPU statistics
     if let Some(ref cpu) = session.cpu_stats {
-        println!("\n{}", style("CPU Load Statistics").green().bold());
+        println!("\n{}", ui::section("CPU Load Statistics"));
         println!("  Average: {:.1}%", cpu.avg);
         println!("  Minimum: {:.1}%", cpu.min);
         println!("  Maximum: {:.1}%", cpu.max);
@@ -522,7 +491,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
 
     // Print GPU statistics
     if let Some(ref gpu) = session.gpu_stats {
-        println!("\n{}", style("GPU Load Statistics").green().bold());
+        println!("\n{}", ui::section("GPU Load Statistics"));
         println!("  Average: {:.1}%", gpu.avg);
         println!("  Minimum: {:.1}%", gpu.min);
         println!("  Maximum: {:.1}%", gpu.max);
@@ -530,7 +499,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
 
     // Print RAM statistics
     if let Some(ref ram) = session.ram_stats {
-        println!("\n{}", style("RAM Usage Statistics").green().bold());
+        println!("\n{}", ui::section("RAM Usage Statistics"));
         println!("  Average: {:.1} MiB", ram.avg);
         println!("  Minimum: {:.1} MiB", ram.min);
         println!("  Maximum: {:.1} MiB", ram.max);
@@ -539,7 +508,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
     // Frame-stall analysis (roadmap item 24)
     let stall_report = helix_core::execution::mangohud::analyze_session(&session);
     if !stall_report.stalls.is_empty() {
-        println!("\n{}", style("Frame-Stall Analysis").green().bold());
+        println!("\n{}", ui::section("Frame-Stall Analysis"));
         println!(
             "  Median frametime: {:.2} ms, p99: {:.2} ms",
             stall_report.median_frametime_ms, stall_report.p99_frametime_ms
@@ -570,7 +539,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
 
     // Print VRAM statistics
     if let Some(ref vram) = session.vram_stats {
-        println!("\n{}", style("VRAM Usage Statistics").green().bold());
+        println!("\n{}", ui::section("VRAM Usage Statistics"));
         println!("  Average: {:.1} MiB", vram.avg);
         println!("  Minimum: {:.1} MiB", vram.min);
         println!("  Maximum: {:.1} MiB", vram.max);
@@ -578,7 +547,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
 
     // Show sample data (first and last 5)
     if session.samples.len() > 10 {
-        println!("\n{}", style("Sample Data (first 5)").green().bold());
+        println!("\n{}", ui::section("Sample Data (first 5)"));
         for sample in session.samples.iter().take(5) {
             println!("  [{:6}ms] FPS: {:6.1} | CPU: {:5.1}% | GPU: {:5.1}% | RAM: {:6.0} MiB | VRAM: {:6.0} MiB",
                 sample.time_ms,
@@ -590,7 +559,7 @@ fn review_single_log(log_path: &Path) -> Result<(), PlayError> {
             );
         }
 
-        println!("\n{}", style("Sample Data (last 5)").green().bold());
+        println!("\n{}", ui::section("Sample Data (last 5)"));
         for sample in session.samples.iter().rev().take(5).rev() {
             println!("  [{:6}ms] FPS: {:6.1} | CPU: {:5.1}% | GPU: {:5.1}% | RAM: {:6.0} MiB | VRAM: {:6.0} MiB",
                 sample.time_ms,
@@ -828,10 +797,9 @@ fn main() {
     }
 
     if args.about {
-        println!("{}", style("helix").bold().cyan());
+        println!("{}", ui::brand());
         println!("  Linux gaming orchestrator — zero-config Windows game launcher");
-        println!();
-        println!("  Version: {}", env!("CARGO_PKG_VERSION"));
+        println!("{}", ui::kv("Version", env!("CARGO_PKG_VERSION")));
         println!();
         return;
     }
@@ -853,7 +821,7 @@ fn main() {
         None => {
             eprintln!(
                 "{} Run with a .exe file to optimize your system and launch the game",
-                style("Usage:").green().bold()
+                ui::section("Usage:")
             );
             eprintln!("  {} helix <game.exe>", style("Example:").dim());
             eprintln!("  {} helix --help for more options", style("Or:").dim());
@@ -949,70 +917,78 @@ fn main() {
         orchestrator.set_launch_args(args.game_args.clone());
         match orchestrator.plan_only(&exe_path) {
             Ok(plan) => {
-                println!();
-                println!("{}", style("  HELIX DRY RUN").bold().cyan());
-                println!("{}", style("  ").cyan());
-                println!("  Game: {}", plan.env.identity.exe_name);
-                println!("  Path: {}", plan.env.identity.exe_path.display());
-                println!("  Hash: {}", plan.env.identity.exe_hash);
-                println!();
-                println!("  Runner: {:?} {}", plan.env.runner.runner_type, plan.env.runner.version);
+                let applied = plan
+                    .tweaks
+                    .iter()
+                    .filter(|t| {
+                        matches!(t.decision, helix_core::models::plan::TweakDecision::Apply(_))
+                    })
+                    .count();
+
+                let mut lines: Vec<String> = Vec::new();
+                lines.push(ui::kv("Game", &plan.env.identity.exe_name));
+                lines.push(ui::kv("Path", &plan.env.identity.exe_path.display().to_string()));
+                lines.push(ui::kv("Hash", &plan.env.identity.exe_hash));
+                lines.push(ui::kv(
+                    "Runner",
+                    &format!("{:?} {}", plan.env.runner.runner_type, plan.env.runner.version),
+                ));
+
                 match &plan.runner_action {
                     helix_core::models::plan::RunnerAction::AlreadyInstalled { path } => {
-                        println!("  Runner action: already installed ({})", path.display());
+                        lines.push(ui::kv(
+                            "Runner action",
+                            &format!("already installed ({})", path.display()),
+                        ));
                     },
-                    helix_core::models::plan::RunnerAction::Download {
-                        url: _, version, ..
-                    } => {
-                        println!("  Runner action: download {}", version);
-                        println!("  Estimated download size: ~1.5 GB");
+                    helix_core::models::plan::RunnerAction::Download { version, .. } => {
+                        lines.push(ui::kv("Runner action", &format!("download {}", version)));
+                        lines.push(ui::kv("Download size", "~1.5 GB"));
                     },
                 }
+
                 match &plan.prefix_action {
                     helix_core::models::plan::PrefixAction::AlreadyExists { path } => {
-                        println!("  Prefix: already exists ({})", path.display());
+                        lines.push(ui::kv(
+                            "Prefix",
+                            &format!("already exists ({})", path.display()),
+                        ));
                     },
                     helix_core::models::plan::PrefixAction::Create { path, .. } => {
-                        println!("  Prefix: create ({})", path.display());
+                        lines.push(ui::kv("Prefix", &format!("create ({})", path.display())));
                     },
                 }
-                println!(
-                    "  Applied tweaks: {}",
-                    plan.tweaks
-                        .iter()
-                        .filter(|t| matches!(
-                            t.decision,
-                            helix_core::models::plan::TweakDecision::Apply(_)
-                        ))
-                        .count()
-                );
+
+                lines.push(ui::kv("Tweaks", &applied.to_string()));
                 for t in &plan.tweaks {
                     if let helix_core::models::plan::TweakDecision::Apply(ref st) = t.decision {
-                        println!("    · {:?}: {:?}", t.id, st);
+                        lines.push(format!("    · {:?}: {:?}", t.id, st));
                     }
                 }
+
                 if !plan.required_packages.is_empty() {
-                    println!("  Required packages:");
+                    lines.push(ui::kv("Packages", ""));
                     for p in &plan.required_packages {
-                        println!("    - {} ({})", p.name, p.reason);
+                        lines.push(format!("    - {} ({})", p.name, p.reason));
                     }
                 }
-                if !plan.warnings.is_empty() {
-                    println!();
-                    for w in &plan.warnings {
-                        println!("  WARNING: {}", w.message);
-                        if let Some(h) = &w.install_hint {
-                            println!("    Hint: {}", h);
-                        }
+
+                for w in &plan.warnings {
+                    lines.push(ui::status_warn(&w.message));
+                    if let Some(h) = &w.install_hint {
+                        lines.push(format!("      Hint: {}", h));
                     }
                 }
+
                 if !plan.hard_blocks.is_empty() {
-                    println!();
-                    println!("  HARD BLOCKS:");
+                    lines.push(ui::status_err("HARD BLOCKS"));
                     for b in &plan.hard_blocks {
-                        println!("    - {}", b);
+                        lines.push(format!("    - {}", b));
                     }
                 }
+
+                println!();
+                println!("{}", ui::card("PLAN", &lines));
                 println!();
                 std::process::exit(0);
             },
@@ -1025,11 +1001,9 @@ fn main() {
 
     // Main game launch flow
     let term = Term::stdout();
-    let _ = term.write_line(&format!(
-        "\n  {} {}\n",
-        style("▶").green().bold(),
-        style("Analyzing game...").dim()
-    ));
+    println!();
+    println!("{}", ui::status_info("Analyzing game…"));
+    let _ = term;
 
     // Create orchestrator (will use existing checkpoint path if found)
     let cmd_runner = Box::new(RealCommandRunner);
@@ -1069,38 +1043,16 @@ fn main() {
 
     // Check for fast launch from validated checkpoint
     if orchestrator.can_fast_launch() {
-        let checkpoint_path = find_checkpoint_by_exe_path(
-            &data_dir()
-                .unwrap_or_else(|| PathBuf::from("~/.local/share"))
-                .join("helix")
-                .join("games"),
-            &exe_path,
-        )
-        .ok()
-        .flatten()
-        .map(|(p, _)| p)
-        .unwrap_or_else(|| PathBuf::from("unknown"));
-
-        println!(
-            "  {} Checkpoint found at {}, launching from saved configuration...",
-            style("Fast launch:").cyan(),
-            style(checkpoint_path.display()).dim()
-        );
-        println!(
-            "  {} Reusing saved DXVK cache; shader compilation skipped.",
-            style("Fast launch:").cyan()
-        );
+        let game_name = exe_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| exe_path.display().to_string());
 
         match orchestrator.fast_launch() {
             Ok(pid) => {
                 println!(
-                    "\n  {} Game launched successfully (PID: {})",
-                    style("Game launched successfully").green().bold(),
-                    pid
-                );
-                println!(
-                    "  {}",
-                    style("Press Ctrl+C to stop monitoring (game continues in background)").dim()
+                    "{}",
+                    ui::status_info(&format!("Fast launch: {} (PID {})", game_name, pid))
                 );
                 std::process::exit(0);
             },
@@ -1112,13 +1064,9 @@ fn main() {
     }
 
     // Run orchestrator lifecycle with progress indicator
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg}")
-            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
-    );
-    pb.set_message("Initializing play session...");
+    let pb = ui::spinner();
+    pb.set_message("Initializing play session...".to_string());
+    // keep tick rate consistent with previous
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
     // Set progress callback to update progress bar
@@ -1156,10 +1104,10 @@ fn main() {
 
             if phase == OrchestratorPhase::Validated {
                 if let Some(pid) = orchestrator.running_game_pid() {
+                    println!();
                     println!(
-                        "\n  {} Game launched successfully (PID: {})",
-                        style("Game launched successfully").green().bold(),
-                        pid
+                        "{}",
+                        ui::status_ok(&format!("Game launched successfully (PID: {})", pid))
                     );
                     println!(
                         "  {}",
@@ -1167,10 +1115,8 @@ fn main() {
                             .dim()
                     );
                 } else {
-                    println!(
-                        "\n  {} Game session completed successfully",
-                        style("Game session completed successfully").green().bold()
-                    );
+                    println!();
+                    println!("{}", ui::status_ok("Game session completed successfully"));
                 }
 
                 // Write metrics on successful completion
@@ -1216,15 +1162,14 @@ fn main() {
                 }
             } else if phase == OrchestratorPhase::Planned {
                 // User aborted during confirmation
-                println!("\n  {} {}", style("⊘").dim(), style("Aborted by user").dim());
+                println!();
+                println!("{}", ui::status_info("Aborted by user"));
             }
 
             std::process::exit(0);
         },
         Err(e) => {
             error!(event = "run_failed", error = %e, "Orchestrator failed");
-
-            eprintln!("\n  {}", style("Game session failed").red().bold());
 
             // Display error with full context including rollback info
             display_error_with_context(&e, &exe_path, &log_path, orchestrator.rollback_manifest());
