@@ -102,6 +102,10 @@ struct CliArgs {
     /// Run hardware detection only and exit (no planning or execution)
     #[arg(long)]
     detect_only: bool,
+
+    /// Enable Wayland debug logging for the spawned game
+    #[arg(long)]
+    wayland_debug: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -1104,6 +1108,10 @@ fn main() {
 
     if args.yes {
         orchestrator.set_confirm_callback(Box::new(|_| true));
+    }
+
+    if args.wayland_debug || args.verbose {
+        std::env::set_var("WAYLAND_DEBUG", "1");
     }
 
     let result = orchestrator.run(&exe_path);

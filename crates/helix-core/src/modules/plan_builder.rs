@@ -11,7 +11,7 @@ use tracing::{info, warn};
 use crate::modules::detection::detect_steam_installation;
 
 use crate::models::environment::{
-    GameEnvironment, ResolutionDecision, SystemTuning, TranslationLayer,
+    DisplayServer, GameEnvironment, ResolutionDecision, SystemTuning, TranslationLayer,
 };
 use crate::models::errors::PlayError;
 use crate::models::plan::{
@@ -54,6 +54,14 @@ impl<'a> PlanBuilder<'a> {
             return Ok(self.early_fail_plan(hard_blocks, false));
         }
         info!("No hard blocks found");
+
+        // Roadmap item 26: Wayland "not responding" guidance.
+        if self.env.hardware.display.server == DisplayServer::Wayland {
+            warnings.push(PlanWarning {
+                message: "Wayland compositor may mark the game 'Not responding' during shader compilation or heavy loading. If that happens, raise the compositor's unresponsive timeout or run with --wayland-debug.".to_owned(),
+                install_hint: Some("KDE: System Settings -> Window Management -> (raise unresponsive timeout)".to_owned()),
+            });
+        }
 
         // --- 4. Translation layer ---
         info!("Selecting translation layer...");
