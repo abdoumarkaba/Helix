@@ -99,6 +99,10 @@ struct CliArgs {
     #[arg(long)]
     review_mangohud: bool,
 
+    /// Show cross-session FPS trend view (use with --review-mangohud)
+    #[arg(long)]
+    trend: bool,
+
     /// Run hardware detection only and exit (no planning or execution)
     #[arg(long)]
     detect_only: bool,
@@ -324,7 +328,7 @@ fn show_log_path(_log_path: &Path) {
 // Review MangoHud Logs
 // ---------------------------------------------------------------------------
 
-fn review_mangohud_logs() -> Result<(), PlayError> {
+fn review_mangohud_logs(show_trend: bool) -> Result<(), PlayError> {
     let log_dir = helix_data_dir().join("logs");
 
     if !log_dir.exists() {
@@ -375,6 +379,8 @@ fn review_mangohud_logs() -> Result<(), PlayError> {
     );
     println!();
 
+    let mut trend_summaries: Vec<helix_core::models::metrics::SessionSummary> = Vec::new();
+
     for (idx, log_path) in log_files.iter().enumerate() {
         let file_name = log_path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
 
@@ -396,7 +402,7 @@ fn review_mangohud_logs() -> Result<(), PlayError> {
         // Try to parse and show summary
         match MangoHudParser::parse_csv(log_path, file_name.to_string()) {
             Ok(session) => {
-                if let Some(fps_stats) = session.fps_stats {
+                if let Some(ref fps_stats) = session.fps_stats {
                     println!(
                         "     {} FPS: avg={:.1}, min={:.1}, max={:.1}, 1% low={:.1}",
                         style("✓").green(),
@@ -407,10 +413,33 @@ fn review_mangohud_logs() -> Result<(), PlayError> {
                     );
                 }
                 println!("     Samples: {}", session.samples.len());
+
+                trend_summaries.push(helix_core::models::metrics::SessionSummary {
+                    game: session.game_name.clone(),
+                    started_at: session.started_at,
+                    avg_fps: session.fps_stats.clone().map(|s| s.avg).unwrap_or(0.0),
+                    p1_low: session.fps_stats.clone().map(|s| s.percentile_1).unwrap_or(0.0),
+                });
             },
             Err(e) => {
                 println!("     {} Failed to parse: {}", style("⚠").yellow(), e);
             },
+        }
+        println!();
+    }
+
+    if show_trend && !trend_summaries.is_empty() {
+        let trends = helix_core::models::metrics::aggregate_trends(&trend_summaries, 5);
+        println!("\n{}", style("FPS Trends (last 5 runs per game)").green().bold());
+        for t in trends {
+            let delta = t.delta_pct.map(|d| format!("{:+.1}%", d)).unwrap_or_else(|| "n/a".to_string());
+            println!(
+                "  {} — runs: {}, avg FPS (last 5): {:.1}, delta: {}",
+                style(&t.game).bold(),
+                t.runs,
+                t.trend_fps,
+                delta
+            );
         }
         println!();
     }
@@ -806,7 +835,7 @@ fn main() {
 
     // Handle MangoHud review command (doesn't require exe_path)
     if args.review_mangohud {
-        match review_mangohud_logs() {
+        match review_mangohud_logs(args.trend) {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("{} {}", style("Error:").red().bold(), e);
@@ -1152,13 +1181,31 @@ fn main() {
                     if let Ok(Some((state_root, _))) =
                         find_checkpoint_by_exe_path(&games_root, &exe_path)
                     {
+                        let fps_metrics = env
+                            .launch
+                            .env
+                            .get("MANGOHUD_CONFIGFILE")
+                            .map(PathBuf::from)
+                            .filter(|p| p.exists())
+                            .and_then(|p| {
+                                MangoHudParser::parse_csv(&p, env.identity.exe_name.clone()).ok()
+                            })
+                            .and_then(|session| {
+                                session.fps_stats.map(|s| FpsMetrics {
+                                    avg_fps: s.avg,
+                                    min_fps: s.min,
+                                    max_fps: s.max,
+                                    percentile_1_low: s.percentile_1,
+                                })
+                            });
+
                         if let Err(e) = write_metrics(
                             &state_root,
                             env,
                             0, // Would come from actual session timing
                             Some(0),
                             false,
-                            None, // Would come from ValidationModule
+                            fps_metrics,
                         ) {
                             warn!(event = "metrics_write_failed", error = %e, "Failed to write metrics");
                         }

@@ -190,3 +190,112 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Cross-session aggregation (roadmap item 28)
+// ---------------------------------------------------------------------------
+
+/// Minimal per-session summary used for trend aggregation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub game: String,
+    pub started_at: DateTime<Utc>,
+    pub avg_fps: f32,
+    pub p1_low: f32,
+}
+
+/// Aggregated trend for one game across multiple sessions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameTrend {
+    pub game: String,
+    pub runs: usize,
+    pub trend_fps: f32,
+    pub delta_pct: Option<f32>,
+    pub points: Vec<SessionSummary>,
+}
+
+/// Aggregate per-session summaries into per-game trends.
+///
+/// `window` controls how many of the most recent runs feed `trend_fps`
+/// (defaults to 5 when 0 is passed).
+pub fn aggregate_trends(sessions: &[SessionSummary], window: usize) -> Vec<GameTrend> {
+    use std::collections::BTreeMap;
+
+    let window = if window == 0 { 5 } else { window };
+
+    let mut groups: BTreeMap<String, Vec<SessionSummary>> = BTreeMap::new();
+    for s in sessions {
+        groups.entry(s.game.clone()).or_default().push(s.clone());
+    }
+
+    let mut trends = Vec::new();
+    for (game, mut points) in groups {
+        points.sort_by(|a, b| a.started_at.cmp(&b.started_at));
+        let runs = points.len();
+        let recent: Vec<&SessionSummary> = points.iter().rev().take(window).collect();
+        let trend_fps = if recent.is_empty() {
+            0.0
+        } else {
+            recent.iter().map(|p| p.avg_fps).sum::<f32>() / recent.len() as f32
+        };
+
+        let delta_pct = if points.len() >= 2 {
+            let first = points[points.len().saturating_sub(window)].avg_fps;
+            let last = points[points.len() - 1].avg_fps;
+            if first > 0.0 {
+                Some((last - first) / first * 100.0)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        trends.push(GameTrend { game, runs, trend_fps, delta_pct, points });
+    }
+
+    trends
+}
+
+#[cfg(test)]
+mod trend_tests {
+    use super::*;
+
+    #[test]
+    fn empty_input_empty_output() {
+        let t = aggregate_trends(&[], 5);
+        assert!(t.is_empty());
+    }
+
+    #[test]
+    fn single_run_delta_none() {
+        let s = SessionSummary {
+            game: "g".to_string(),
+            started_at: Utc::now(),
+            avg_fps: 60.0,
+            p1_low: 45.0,
+        };
+        let t = aggregate_trends(&[s], 5);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].runs, 1);
+        assert!(t[0].delta_pct.is_none());
+    }
+
+    #[test]
+    fn windowed_mean_and_delta() {
+        let base = Utc::now();
+        let pts: Vec<SessionSummary> = (0..6)
+            .map(|i| SessionSummary {
+                game: "g".to_string(),
+                started_at: base + chrono::Duration::seconds(i as i64),
+                avg_fps: 50.0 + i as f32 * 2.0,
+                p1_low: 40.0,
+            })
+            .collect();
+        let t = aggregate_trends(&pts, 3);
+        assert_eq!(t[0].runs, 6);
+        // last 3: 56,58,60 -> mean 58
+        assert!((t[0].trend_fps - 58.0).abs() < 0.01);
+        assert!(t[0].delta_pct.is_some());
+    }
+}
