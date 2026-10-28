@@ -273,15 +273,16 @@ impl RunnerModule {
         let mut gui_child = if detect_gui_progress_tool() == Some("zenity") {
             use std::process::{Command, Stdio};
             let mut cmd = Command::new("zenity");
-            cmd.args(["--progress", "--title=Helix", "--text=Downloading runner...", "--auto-close"]);
+            cmd.args([
+                "--progress",
+                "--title=Helix",
+                "--text=Downloading runner...",
+                "--auto-close",
+            ]);
             if total_bytes.is_none() {
                 cmd.arg("--pulsate");
             }
-            cmd.stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .ok()
+            cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()
         } else {
             None
         };

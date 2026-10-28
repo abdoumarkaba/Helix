@@ -85,6 +85,10 @@ struct CliArgs {
     #[arg(long)]
     about: bool,
 
+    /// Download a ProtonGE runner (default: 11.11.0) and exit
+    #[arg(long)]
+    dl_runner: bool,
+
     /// Show log file location
     #[arg(long)]
     log_path: bool,
@@ -802,6 +806,34 @@ fn main() {
         println!("{}", ui::kv("Version", env!("CARGO_PKG_VERSION")));
         println!();
         return;
+    }
+
+    if args.dl_runner {
+        let manifest = helix_core::modules::runner_manifest::get_default_manifest();
+        let release = manifest.runners.iter().find(|r| {
+            r.runner_type == helix_core::models::environment::RunnerType::ProtonGE
+                && r.version.to_string() == "11.11.0"
+        });
+        let Some(release) = release else {
+            eprintln!("{} Runner not found in manifest", style("Error:").red().bold());
+            std::process::exit(1);
+        };
+        let action = helix_core::models::plan::RunnerAction::Download {
+            url: release.url.clone(),
+            version: release.version.clone(),
+            sha512: release.sha512.clone(),
+        };
+        let module = helix_core::execution::runner::RunnerModule::new(get_runners_root());
+        match module.execute(&action) {
+            Ok(path) => {
+                println!("{}", ui::status_ok(&format!("Runner installed at {}", path.display())));
+                std::process::exit(0);
+            },
+            Err(e) => {
+                eprintln!("{} {}", style("Error:").red().bold(), e);
+                std::process::exit(1);
+            },
+        }
     }
 
     // Handle MangoHud review command (doesn't require exe_path)

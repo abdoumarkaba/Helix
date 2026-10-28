@@ -27,6 +27,12 @@ pub fn get_default_manifest() -> RunnersManifest {
                 url: "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton9-27/GE-Proton9-27.tar.gz".to_string(),
                 sha512: "PLACEHOLDER_GE_PROTON_9_27_SHA512".to_string(),
             },
+            RunnerRelease {
+                runner_type: RunnerType::ProtonGE,
+                version: semver::Version::new(11, 11, 0),
+                url: "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton11-11/GE-Proton11-11-x86_64.tar.gz".to_string(),
+                sha512: "45721a7b625b2404d8896bb5e2a8b87fc9623a394873a6dd6b900c839681d5c01ec694ca00d003fc9c733c5f6c5648af8171985656f9fa47e20999fbebdbe235".to_string(),
+            },
         ],
     }
 }
