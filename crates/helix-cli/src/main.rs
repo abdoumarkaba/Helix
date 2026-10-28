@@ -129,7 +129,7 @@ fn get_log_dir() -> PathBuf {
     helix_data_dir().join("logs")
 }
 
-fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
+fn setup_tracing(verbose: bool, exe_path: Option<&Path>) -> PathBuf {
     let log_dir = get_log_dir();
 
     // Create log directory if it doesn't exist
@@ -141,39 +141,41 @@ fn setup_tracing(_verbose: bool, exe_path: Option<&Path>) -> PathBuf {
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let game_name =
         exe_path.and_then(|p| p.file_stem()).and_then(|s| s.to_str()).unwrap_or("unknown");
-    let log_filename = format!("play-{}-{}.log", timestamp, game_name);
+    let log_filename = format!("helix-{}-{}.log", timestamp, game_name);
     let log_path = log_dir.join(&log_filename);
 
     // Create single file appender (non-rotating) for this run
     let file_appender = tracing_appender::rolling::RollingFileAppender::new(
         tracing_appender::rolling::Rotation::NEVER,
         &log_dir,
-        format!("play-{}-{}", timestamp, game_name),
+        format!("helix-{}-{}", timestamp, game_name),
     );
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     // Keep the guard alive for the duration of the program
     Box::leak(Box::new(_guard));
 
-    // Always verbose for now - show everything to console
-    let filter = "helix_core=debug,play_cli=debug,info";
+    let file_filter = tracing_subscriber::EnvFilter::new("helix_core=debug,helix_cli=debug,info");
+    let console_filter = if verbose {
+        tracing_subscriber::EnvFilter::new("helix_core=debug,helix_cli=debug,info")
+    } else {
+        tracing_subscriber::EnvFilter::new("warn")
+    };
 
     // Set up console output in addition to file
     let console_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
         .with_ansi(true)
-        .with_target(false);
+        .with_target(false)
+        .with_filter(console_filter);
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(non_blocking)
-                .with_ansi(false)
-                .with_target(false),
-        )
-        .with(console_layer)
-        .with(tracing_subscriber::EnvFilter::new(filter))
-        .init();
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_target(false)
+        .with_filter(file_filter);
+
+    tracing_subscriber::registry().with(file_layer).with(console_layer).init();
 
     // Print the log file path at startup so user knows where to find it
     eprintln!("{} {}", style("Log file:").dim(), log_path.display());
