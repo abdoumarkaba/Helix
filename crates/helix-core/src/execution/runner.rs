@@ -24,10 +24,19 @@ const MAX_RETRIES: u8 = 3;
 
 /// Detect an available GUI progress tool.
 pub fn detect_gui_progress_tool() -> Option<&'static str> {
-    use std::process::Command;
-    ["zenity", "kdialog"].into_iter().find(|tool| {
-        Command::new("which").arg(tool).output().map(|o| o.status.success()).unwrap_or(false)
-    })
+    // Avoid relying on the external `which` utility, which may be absent on
+    // minimal systems. Check PATH directly instead.
+    fn command_exists(tool: &str) -> bool {
+        if let Some(path_var) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&path_var) {
+                if dir.join(tool).is_file() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    ["zenity", "kdialog"].into_iter().find(|tool| command_exists(tool))
 }
 
 /// Buffer size for streaming downloads (64 KiB).
@@ -224,7 +233,12 @@ impl RunnerModule {
         let response = ureq::get(url).call().map_err(|e| format!("HTTP request failed: {e}"))?;
 
         // Try to get content length for progress bar
-        let total_bytes = response.header("content-length").and_then(|h| h.parse::<u64>().ok());
+        // Treat a missing or zero content-length as "unknown size" so we never
+        // divide by zero when computing GUI progress percentages.
+        let total_bytes = response
+            .header("content-length")
+            .and_then(|h| h.parse::<u64>().ok())
+            .filter(|&n| n > 0);
 
         let pb = if let Some(total) = total_bytes {
             let pb = ProgressBar::new(total);
