@@ -46,7 +46,7 @@ Or install manually:
 
 ```bash
 # Download latest release
-curl -sSL https://github.com/abdoumarkaba/Just-Play/releases/latest/download/helix-x86_64.tar.gz | tar xz
+curl -sSL https://github.com/abdoumarkaba/Helix/releases/latest/download/helix-x86_64.tar.gz | tar xz
 
 # Install binary
 sudo mv helix /usr/local/bin/
@@ -240,8 +240,8 @@ curl -sSL https://raw.githubusercontent.com/abdoumarkaba/Helix/main/install.sh |
 ### From Source
 
 ```bash
-git clone https://github.com/abdoumarkaba/Just-Play.git
-cd Just-Play
+git clone https://github.com/abdoumarkaba/Helix.git
+cd Helix
 cargo build --release
 
 # Install binaries
