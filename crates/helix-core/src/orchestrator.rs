@@ -362,6 +362,10 @@ impl Orchestrator {
     pub fn plan_only(&mut self, exe_path: &Path) -> Result<&GamePlan, PlayError> {
         // Ensure state directory exists (mirrors run())
         let _ = std::fs::create_dir_all(&self.state_root);
+        // A recovered Failed session cannot be resumed; start fresh.
+        if self.phase == OrchestratorPhase::Failed {
+            self.phase = OrchestratorPhase::Initialized;
+        }
         // Detection
         if self.phase < OrchestratorPhase::Detected {
             if let Err(e) = self.detect(exe_path) {
@@ -492,6 +496,12 @@ impl Orchestrator {
             path: self.state_root.clone(),
             reason: format!("failed to create state directory: {e}"),
         })?;
+
+        // A recovered Failed session cannot be resumed; start fresh instead of
+        // panicking on phase invariants.
+        if self.phase == OrchestratorPhase::Failed {
+            self.phase = OrchestratorPhase::Initialized;
+        }
 
         // Phase 1: Detection (skip if already detected from checkpoint)
         if self.phase < OrchestratorPhase::Detected {
@@ -975,6 +985,19 @@ impl Orchestrator {
 
     /// After detection, rename state directory from temp name to real SHA256 hash.
     fn rename_state_to_hash(&mut self) -> Result<(), PlayError> {
+        // Only rename temporary (pending-*) state directories. Already-final
+        // directories (e.g. recovered sessions) must never be renamed, as that
+        // would nest them inside themselves.
+        let is_temp = self
+            .state_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.starts_with("pending-"))
+            .unwrap_or(false);
+        if !is_temp {
+            return Ok(());
+        }
+
         let env = self.env.as_ref().ok_or_else(|| PlayError::OrchestratorFailed {
             phase: "rename_state".to_string(),
             reason: "no environment after detection".to_string(),
