@@ -503,16 +503,6 @@ impl Orchestrator {
             self.phase = OrchestratorPhase::Initialized;
         }
 
-        // `run` always performs a full lifecycle. Never resume from a
-        // completed/validated checkpoint here; re-evaluate detection, planning,
-        // prefixes, and missing components from scratch.
-        if self.phase != OrchestratorPhase::Initialized {
-            self.phase = OrchestratorPhase::Initialized;
-            self.env = None;
-            self.plan = None;
-            let _ = fs::remove_file(self.checkpoint_path());
-        }
-
         // Phase 1: Detection (skip if already detected from checkpoint)
         if self.phase < OrchestratorPhase::Detected {
             if let Err(e) = self.detect(exe_path) {
