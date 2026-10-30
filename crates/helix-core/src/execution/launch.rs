@@ -153,6 +153,7 @@ impl LaunchModule {
 
         // Poll for process stability with /proc verification
         let mut stable_count = 0;
+        let mut d_state_count = 0;
         let required_stable_checks = (LAUNCH_STABILIZE_SECS / POLL_INTERVAL_SECS) as usize;
         // Early-exit threshold: 3 consecutive stable checks indicate process is truly stable
         const EARLY_EXIT_THRESHOLD: usize = 3;
@@ -197,6 +198,27 @@ impl LaunchModule {
                 Ok(None) => {
                     // Process still running - verify it actually exists in /proc
                     if proc_exists {
+                        // Treat prolonged uninterruptible sleep (D state) as a
+                        // failed launch rather than a stable process.
+                        if Self::process_state(pid) == Some('D') {
+                            d_state_count += 1;
+                            tracing::warn!(
+                                pid,
+                                d_state_count,
+                                "Process is in uninterruptible sleep (D state)"
+                            );
+                            if d_state_count >= EARLY_EXIT_THRESHOLD {
+                                return Err(PlayError::GameLaunchFailed {
+                                    exe_path: exe_path.clone(),
+                                    reason: format!(
+                                        "process stuck in uninterruptible sleep (D state) for {} checks",
+                                        d_state_count
+                                    ),
+                                });
+                            }
+                            continue;
+                        }
+
                         stable_count += 1;
                         tracing::debug!(
                             pid,
@@ -250,6 +272,13 @@ impl LaunchModule {
         }
 
         Ok(child)
+    }
+
+    /// Read the process state character from /proc/<pid>/stat.
+    fn process_state(pid: u32) -> Option<char> {
+        let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
+        let end = stat.rfind(')')?;
+        stat[end + 1..].split_whitespace().next()?.chars().next()
     }
 
     /// Check if a process has any child processes by reading /proc.
