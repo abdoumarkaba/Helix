@@ -781,6 +781,9 @@ impl Orchestrator {
             self.install_packages(&plan.required_packages)?;
         }
 
+        // Verify privileged helper readiness (non-fatal: warns only).
+        self.verify_helper_readiness();
+
         // Ensure runner
         self.report_progress("Downloading runner...");
         let runner_module = RunnerModule::new(self.runners_root.clone());
@@ -1510,6 +1513,25 @@ impl Orchestrator {
         self.verify_vulkan()?;
 
         Ok(())
+    }
+
+    /// Verify privileged helper readiness (non-fatal).
+    fn verify_helper_readiness(&self) {
+        use std::path::Path;
+        // pkexec availability
+        if self.cmd_runner.run_command("pkexec", &["--version"]).is_err() {
+            self.report_progress("Warning: pkexec not found; system tweaks requiring privileges will fail.");
+        }
+        // helix-helper binary on PATH
+        if self.cmd_runner.run_command("helix-helper", &["--version"]).is_err()
+            && self.cmd_runner.run_command("play-helper", &["--version"]).is_err()
+        {
+            self.report_progress("Warning: helix-helper not found on PATH; privileged tweaks may be unavailable.");
+        }
+        // polkit policy file
+        if !Path::new("/usr/share/polkit-1/actions/com.github.abdoumarkt.play.policy").exists() {
+            self.report_progress("Warning: polkit policy not installed; password prompts may fail.");
+        }
     }
 
     /// Verify Vulkan is working after package installation.

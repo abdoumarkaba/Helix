@@ -558,6 +558,19 @@ impl<'a> PlanBuilder<'a> {
             });
         }
 
+        // Extraction / download prerequisites for runner acquisition.
+        for (name, reason) in [
+            ("tar", "Archive extraction for downloaded runners."),
+            ("zstd", "Zstandard decompression for runner archives."),
+            ("curl", "HTTPS download of Proton runners."),
+        ] {
+            packages.push(RequiredPackage {
+                name: name.to_owned(),
+                reason: reason.to_owned(),
+                already_installed: false,
+            });
+        }
+
         // 32-bit support for 32-bit PE binaries (P2 of zero-config bootstrap plan).
         if self.env.identity.pe_arch == crate::models::environment::PeArchitecture::X86 {
             use crate::models::environment::Distro;

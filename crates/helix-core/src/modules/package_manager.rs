@@ -31,6 +31,9 @@ pub enum Capability {
     LinuxFirmware,
     Wine32,
     VulkanLoader32,
+    Tar,
+    Zstd,
+    Curl,
 }
 
 /// Trait for distro package managers.
@@ -115,6 +118,21 @@ impl PackageManager for AptPm {
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false),
+            "tar" => Command::new("tar")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "zstd" => Command::new("zstd")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "curl" => Command::new("curl")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
             "gamemode" => {
                 Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
                     || Command::new("gamemode")
@@ -166,6 +184,9 @@ impl PackageManager for AptPm {
             Capability::LinuxFirmware => Some("linux-firmware"),
             Capability::Wine32 => Some("wine32"),
             Capability::VulkanLoader32 => Some("libvulkan1:i386"),
+            Capability::Tar => Some("tar"),
+            Capability::Zstd => Some("zstd"),
+            Capability::Curl => Some("curl"),
         }
     }
 }
@@ -202,6 +223,21 @@ impl PackageManager for DnfPm {
                 .map(|o| o.status.success())
                 .unwrap_or(false),
             "mangohud" => Command::new("mangohud")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "tar" => Command::new("tar")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "zstd" => Command::new("zstd")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "curl" => Command::new("curl")
                 .arg("--version")
                 .output()
                 .map(|o| o.status.success())
@@ -256,6 +292,9 @@ impl PackageManager for DnfPm {
             Capability::LinuxFirmware => Some("linux-firmware"),
             Capability::Wine32 => Some("wine"),
             Capability::VulkanLoader32 => Some("vulkan-loader.i686"),
+            Capability::Tar => Some("tar"),
+            Capability::Zstd => Some("zstd"),
+            Capability::Curl => Some("curl"),
         }
     }
 }
@@ -296,6 +335,21 @@ impl PackageManager for PacmanPm {
                 .map(|o| o.status.success())
                 .unwrap_or(false),
             "mangohud" => Command::new("mangohud")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "tar" => Command::new("tar")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "zstd" => Command::new("zstd")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "curl" => Command::new("curl")
                 .arg("--version")
                 .output()
                 .map(|o| o.status.success())
@@ -351,6 +405,9 @@ impl PackageManager for PacmanPm {
             Capability::LinuxFirmware => Some("linux-firmware"),
             Capability::Wine32 => Some("lib32-glibc"),
             Capability::VulkanLoader32 => Some("lib32-vulkan-icd-loader"),
+            Capability::Tar => Some("tar"),
+            Capability::Zstd => Some("zstd"),
+            Capability::Curl => Some("curl"),
         }
     }
 }
@@ -391,6 +448,21 @@ impl PackageManager for ZypperPm {
                 .map(|o| o.status.success())
                 .unwrap_or(false),
             "mangohud" => Command::new("mangohud")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "tar" => Command::new("tar")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "zstd" => Command::new("zstd")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "curl" => Command::new("curl")
                 .arg("--version")
                 .output()
                 .map(|o| o.status.success())
@@ -446,6 +518,9 @@ impl PackageManager for ZypperPm {
             Capability::LinuxFirmware => Some("kernel-firmware"),
             Capability::Wine32 => Some("wine-32bit"),
             Capability::VulkanLoader32 => Some("libvulkan1-32bit"),
+            Capability::Tar => Some("tar"),
+            Capability::Zstd => Some("zstd"),
+            Capability::Curl => Some("curl"),
         }
     }
 }
@@ -513,19 +588,19 @@ mod tests {
     fn package_for_all_capabilities() {
         use Capability::*;
         let apt = AptPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl] {
             assert!(apt.package_for(cap).is_some());
         }
         let dnf = DnfPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl] {
             assert!(dnf.package_for(cap).is_some());
         }
         let pacman = PacmanPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl] {
             assert!(pacman.package_for(cap).is_some());
         }
         let zypper = ZypperPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl] {
             assert!(zypper.package_for(cap).is_some());
         }
     }
