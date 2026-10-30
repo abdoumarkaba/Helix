@@ -88,6 +88,10 @@ pub enum GameEngine {
     REEngine,
     /// id Software
     IDAEngine,
+    /// GameMaker games
+    GameMaker,
+    /// RPGMaker games
+    RPGMaker,
     Unknown,
 }
 
