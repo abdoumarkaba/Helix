@@ -1056,6 +1056,7 @@ fn main() {
             Err(e) => {
                 eprintln!("\n  {} Fast launch failed: {}", style("Warning:").yellow(), e);
                 eprintln!("  Falling back to full setup...\n");
+                orchestrator.reset_for_full_run();
             },
         }
     }

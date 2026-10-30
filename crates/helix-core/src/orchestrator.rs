@@ -414,6 +414,15 @@ impl Orchestrator {
         self.phase == OrchestratorPhase::Validated && self.plan.is_some()
     }
 
+    /// Reset a validated session so the full lifecycle can recreate missing
+    /// artifacts (prefix, runner, cache) without forcing this on every launch.
+    pub fn reset_for_full_run(&mut self) {
+        self.phase = OrchestratorPhase::Initialized;
+        self.env = None;
+        self.plan = None;
+        let _ = fs::remove_file(self.checkpoint_path());
+    }
+
     /// Fast launch from a validated checkpoint.
     ///
     /// Skips detection, planning, and confirmation phases. Directly launches
@@ -435,6 +444,21 @@ impl Orchestrator {
 
         let plan = self.plan.as_ref().expect("plan checked above");
         let env = self.env.as_ref().expect("env exists when plan exists");
+
+        // Do not fast-launch when critical artifacts are missing; fall back to
+        // full setup so they can be recreated.
+        if !plan.env.runner.install_path.exists() {
+            return Err(PlayError::OrchestratorFailed {
+                phase: "fast_launch".to_string(),
+                reason: format!("Runner missing at {}", plan.env.runner.install_path.display()),
+            });
+        }
+        if !env.prefix.path.exists() {
+            return Err(PlayError::OrchestratorFailed {
+                phase: "fast_launch".to_string(),
+                reason: format!("Prefix missing at {}", env.prefix.path.display()),
+            });
+        }
 
         info!(
             event = "fast_launch_start",
@@ -501,6 +525,13 @@ impl Orchestrator {
         // panicking on phase invariants.
         if self.phase == OrchestratorPhase::Failed {
             self.phase = OrchestratorPhase::Initialized;
+        }
+
+        // `run` is the full lifecycle. If a validated checkpoint reaches here
+        // (e.g. after a failed fast launch), reset so missing artifacts can be
+        // recreated without forcing this on every successful launch.
+        if self.phase == OrchestratorPhase::Validated {
+            self.reset_for_full_run();
         }
 
         // Phase 1: Detection (skip if already detected from checkpoint)
