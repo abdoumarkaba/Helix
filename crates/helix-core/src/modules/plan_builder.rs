@@ -549,6 +549,15 @@ impl<'a> PlanBuilder<'a> {
             });
         }
 
+        // Check MangoHud (promoted from hint-only to provisioned component)
+        if !self.env.hardware.gaming_tools.mangohud_installed {
+            packages.push(RequiredPackage {
+                name: "mangohud".to_owned(),
+                reason: "MangoHud performance overlay and FPS logging.".to_owned(),
+                already_installed: false,
+            });
+        }
+
         // 32-bit support for 32-bit PE binaries (P2 of zero-config bootstrap plan).
         if self.env.identity.pe_arch == crate::models::environment::PeArchitecture::X86 {
             use crate::models::environment::Distro;

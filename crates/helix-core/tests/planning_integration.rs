@@ -87,7 +87,7 @@ fn base_env(dx: DirectXVersion, pe_arch: PeArchitecture) -> GameEnvironment {
                 dxvk_installed: false,
                 proton_available: false,
                 vulkan_available: false,
-            },
+                mangohud_installed: false,            },
         },
         graphics: GraphicsConfig {
             translation_layer: TranslationLayer::Dxvk,

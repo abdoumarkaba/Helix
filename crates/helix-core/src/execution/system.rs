@@ -463,7 +463,7 @@ mod tests {
                 dxvk_installed: false,
                 proton_available: false,
                 vulkan_available: false,
-            },
+                mangohud_installed: false,            },
         }
     }
 

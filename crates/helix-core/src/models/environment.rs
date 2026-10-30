@@ -257,6 +257,7 @@ pub struct GamingToolsProfile {
     pub dxvk_installed: bool,
     pub proton_available: bool,
     pub vulkan_available: bool,
+    pub mangohud_installed: bool,
 }
 
 // ---------------------------------------------------------------------------

@@ -1183,6 +1183,14 @@ pub fn detect_gaming_tools(
         info!("Vulkan not available");
     }
 
+    // Check MangoHud
+    let mangohud_installed = cmd_runner.run_command("mangohud", &["--version"]).is_ok();
+    if mangohud_installed {
+        info!("MangoHud detected");
+    } else {
+        info!("MangoHud not available");
+    }
+
     crate::models::environment::GamingToolsProfile {
         wine_installed,
         wine_version,
@@ -1191,6 +1199,7 @@ pub fn detect_gaming_tools(
         dxvk_installed,
         proton_available,
         vulkan_available,
+        mangohud_installed,
     }
 }
 

@@ -110,6 +110,11 @@ impl PackageManager for AptPm {
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false),
+            "mangohud" => Command::new("mangohud")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
             "gamemode" => {
                 Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
                     || Command::new("gamemode")
@@ -193,6 +198,11 @@ impl PackageManager for DnfPm {
                 .unwrap_or(false),
             "vulkan-loader.i686" => Command::new("vulkaninfo")
                 .arg("--summary")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "mangohud" => Command::new("mangohud")
+                .arg("--version")
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false),
@@ -285,6 +295,11 @@ impl PackageManager for PacmanPm {
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false),
+            "mangohud" => Command::new("mangohud")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
             "gamemode" => {
                 Command::new("gamemoderun").output().map(|o| o.status.success()).unwrap_or(false)
                     || Command::new("gamemode")
@@ -371,6 +386,11 @@ impl PackageManager for ZypperPm {
                 .map(|o| o.status.success())
                 .unwrap_or(false),
             "wine-32bit" => Command::new("wine")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "mangohud" => Command::new("mangohud")
                 .arg("--version")
                 .output()
                 .map(|o| o.status.success())
