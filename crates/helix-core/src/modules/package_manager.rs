@@ -34,6 +34,8 @@ pub enum Capability {
     Tar,
     Zstd,
     Curl,
+    LinuxTools,
+    Tuned,
 }
 
 /// Trait for distro package managers.
@@ -187,6 +189,8 @@ impl PackageManager for AptPm {
             Capability::Tar => Some("tar"),
             Capability::Zstd => Some("zstd"),
             Capability::Curl => Some("curl"),
+            Capability::LinuxTools => Some("linux-tools"),
+            Capability::Tuned => Some("tuned"),
         }
     }
 }
@@ -295,6 +299,8 @@ impl PackageManager for DnfPm {
             Capability::Tar => Some("tar"),
             Capability::Zstd => Some("zstd"),
             Capability::Curl => Some("curl"),
+            Capability::LinuxTools => Some("linux-tools"),
+            Capability::Tuned => Some("tuned"),
         }
     }
 }
@@ -408,6 +414,8 @@ impl PackageManager for PacmanPm {
             Capability::Tar => Some("tar"),
             Capability::Zstd => Some("zstd"),
             Capability::Curl => Some("curl"),
+            Capability::LinuxTools => Some("linux-tools"),
+            Capability::Tuned => Some("tuned"),
         }
     }
 }
@@ -521,6 +529,8 @@ impl PackageManager for ZypperPm {
             Capability::Tar => Some("tar"),
             Capability::Zstd => Some("zstd"),
             Capability::Curl => Some("curl"),
+            Capability::LinuxTools => Some("linux-tools"),
+            Capability::Tuned => Some("tuned"),
         }
     }
 }
@@ -588,19 +598,19 @@ mod tests {
     fn package_for_all_capabilities() {
         use Capability::*;
         let apt = AptPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl, LinuxTools, Tuned] {
             assert!(apt.package_for(cap).is_some());
         }
         let dnf = DnfPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl, LinuxTools, Tuned] {
             assert!(dnf.package_for(cap).is_some());
         }
         let pacman = PacmanPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl, LinuxTools, Tuned] {
             assert!(pacman.package_for(cap).is_some());
         }
         let zypper = ZypperPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32, Tar, Zstd, Curl, LinuxTools, Tuned] {
             assert!(zypper.package_for(cap).is_some());
         }
     }
