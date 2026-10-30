@@ -785,7 +785,14 @@ impl Orchestrator {
         self.verify_helper_readiness();
 
         // Ensure runner
-        self.report_progress("Downloading runner...");
+        match &plan.runner_action {
+            crate::models::plan::RunnerAction::AlreadyInstalled { .. } => {
+                self.report_progress("Using installed runner...");
+            },
+            crate::models::plan::RunnerAction::Download { .. } => {
+                self.report_progress("Downloading runner...");
+            },
+        }
         let runner_module = RunnerModule::new(self.runners_root.clone());
         runner_module.execute(&plan.runner_action)?;
 
@@ -1373,7 +1380,7 @@ impl Orchestrator {
 
     /// Interactive confirmation using dialoguer.
     fn interactive_confirm(&self, plan: &GamePlan) -> Result<bool, PlayError> {
-        use console::{measure_text_width, style, Term};
+        use console::style;
 
         let applied = plan
             .tweaks
@@ -1406,33 +1413,11 @@ impl Orchestrator {
             }
         }
 
-        // Render a rounded card (same layout as CLI ui::card).
-        let term_width = Term::stdout().size().1 as usize;
-        let width = if term_width == 0 { 80 } else { term_width };
-        if width < 60 {
-            println!();
-            println!("{}", style("PLAN").bold().magenta());
-            for l in &lines {
-                println!("{}", l);
-            }
-        } else {
-            let w = width.min(72);
-            let title = "PLAN";
-            let title_len = measure_text_width(title);
-            let fill = if w >= title_len + 5 { w - title_len - 5 } else { 0 };
-            println!();
-            println!("╭─ {} {}╮", style(title).bold().magenta(), "─".repeat(fill));
-            let inner = w.saturating_sub(4);
-            for l in &lines {
-                let tw = measure_text_width(l);
-                if tw <= inner {
-                    let pad = inner - tw;
-                    println!("│ {}{} │", l, " ".repeat(pad));
-                } else {
-                    println!("│ {} │", l);
-                }
-            }
-            println!("╰{}╯", "─".repeat(w.saturating_sub(2)));
+        // Render plan details without a surrounding frame.
+        println!();
+        println!("{}", style("PLAN").bold().magenta());
+        for l in &lines {
+            println!("{}", l);
         }
         println!();
 
