@@ -69,6 +69,7 @@ fn e2e_happy_path() {
 
     let mut responses = HashMap::new();
     responses.insert("pkexec".to_string(), Ok(String::new()));
+    responses.insert("apt".to_string(), Ok("apt 2.0".to_string()));
     responses.insert("wine".to_string(), Ok("wine-9.0".to_string()));
     responses.insert("gamemoded".to_string(), Ok("gamemoded 1.8".to_string()));
     responses.insert("vulkaninfo".to_string(), Ok("apiVersion = 1.3.0".to_string()));

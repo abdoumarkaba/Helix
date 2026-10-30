@@ -1482,6 +1482,11 @@ impl Orchestrator {
             return Ok(());
         }
 
+        // Enable i386 multiarch where needed before installing 32-bit packages.
+        if let Err(e) = pm.prepare_multiarch() {
+            self.report_progress(&format!("Multiarch preparation failed: {e}"));
+        }
+
         let install_msg =
             format!("Installing {} packages (sudo password may be required)...", to_install.len());
         self.report_progress(&install_msg);

@@ -549,6 +549,60 @@ impl<'a> PlanBuilder<'a> {
             });
         }
 
+        // 32-bit support for 32-bit PE binaries (P2 of zero-config bootstrap plan).
+        if self.env.identity.pe_arch == crate::models::environment::PeArchitecture::X86 {
+            use crate::models::environment::Distro;
+            let (wine32_name, vulkan32_name) = match self.env.hardware.distro.distro {
+                Distro::Ubuntu | Distro::Debian => ("wine32", "libvulkan1:i386"),
+                Distro::Fedora => ("wine", "vulkan-loader.i686"),
+                Distro::Arch => ("lib32-glibc", "lib32-vulkan-icd-loader"),
+                Distro::OpenSUSE => ("wine-32bit", "libvulkan1-32bit"),
+                Distro::Unknown => ("wine32", "vulkan-loader (32-bit)"),
+            };
+            packages.push(RequiredPackage {
+                name: wine32_name.to_owned(),
+                reason: "32-bit Wine support for x86 game binary.".to_owned(),
+                already_installed: false,
+            });
+            packages.push(RequiredPackage {
+                name: vulkan32_name.to_owned(),
+                reason: "32-bit Vulkan loader/ICD for x86 game binary.".to_owned(),
+                already_installed: false,
+            });
+        }
+
+        // GPU driver / Vulkan ICD provisioning (P1 of zero-config bootstrap plan).
+        // Only request packages when the corresponding component is missing.
+        use crate::models::environment::GpuVendor;
+        match self.env.hardware.gpu.vendor {
+            GpuVendor::NVIDIA => {
+                if self.env.hardware.gpu.driver_type
+                    != crate::models::environment::DriverType::NvidiaProprietary
+                {
+                    packages.push(RequiredPackage {
+                        name: "nvidia-driver".to_owned(),
+                        reason: "NVIDIA proprietary driver for hardware acceleration.".to_owned(),
+                        already_installed: false,
+                    });
+                }
+                if !self.env.hardware.gaming_tools.vulkan_available {
+                    packages.push(RequiredPackage {
+                        name: "nvidia-vulkan-icd".to_owned(),
+                        reason: "NVIDIA Vulkan ICD for D3D/Vulkan translation.".to_owned(),
+                        already_installed: false,
+                    });
+                }
+            },
+            GpuVendor::AMD | GpuVendor::Intel if !self.env.hardware.gaming_tools.vulkan_available => {
+                packages.push(RequiredPackage {
+                    name: "mesa-vulkan-drivers".to_owned(),
+                    reason: "Mesa Vulkan drivers for AMD/Intel GPUs.".to_owned(),
+                    already_installed: false,
+                });
+            },
+            _ => {},
+        }
+
         // DXVK and VKD3D-Proton are bundled in Proton-GE, no separate installation needed.
         let _ = layer;
 

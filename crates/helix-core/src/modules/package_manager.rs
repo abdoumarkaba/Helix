@@ -22,6 +22,15 @@ pub enum Capability {
     VulkanTools,
     WineBase,
     CabExtract,
+    // GPU driver / Vulkan provisioning (P1)
+    GpuDriverNvidia,
+    GpuDriverMesa,
+    VulkanLoader,
+    VulkanIcdMesa,
+    VulkanIcdNvidia,
+    LinuxFirmware,
+    Wine32,
+    VulkanLoader32,
 }
 
 /// Trait for distro package managers.
@@ -29,6 +38,12 @@ pub enum Capability {
 /// Each implementation knows how to install packages and map
 /// a [`Capability`] to the correct package name on its distro.
 pub trait PackageManager: Send + Sync {
+    /// Prepare multiarch support (e.g. i386) before installing 32-bit packages.
+    /// Default is a no-op for distros that do not require explicit multiarch setup.
+    fn prepare_multiarch(&self) -> Result<(), PlayError> {
+        Ok(())
+    }
+
     /// Human-readable name, e.g. `"apt"`, `"dnf"`, `"pacman"`.
     fn name(&self) -> &'static str;
 
@@ -45,6 +60,29 @@ pub trait PackageManager: Send + Sync {
 pub struct AptPm;
 
 impl PackageManager for AptPm {
+    fn prepare_multiarch(&self) -> Result<(), PlayError> {
+        // Enable i386 multiarch (idempotent) and refresh package lists.
+        let _ = std::process::Command::new("sudo")
+            .args(["dpkg", "--add-architecture", "i386"])
+            .output();
+        let output = std::process::Command::new("sudo")
+            .args(["apt-get", "update"])
+            .output()
+            .map_err(|e| PlayError::PackageInstall {
+                pm: "apt".into(),
+                package: "multiarch".into(),
+                stderr: e.to_string(),
+            })?;
+        if !output.status.success() {
+            return Err(PlayError::PackageInstall {
+                pm: "apt".into(),
+                package: "multiarch".into(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn name(&self) -> &'static str {
         "apt"
     }
@@ -62,8 +100,13 @@ impl PackageManager for AptPm {
 
         // Also check for common binary if package check fails
         match package {
-            "wine64" => Command::new("wine")
+            "wine64" | "wine32" | "wine" => Command::new("wine")
                 .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "libvulkan1:i386" | "vulkan-loader.i686" => Command::new("vulkaninfo")
+                .arg("--summary")
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false),
@@ -110,6 +153,14 @@ impl PackageManager for AptPm {
             Capability::VulkanTools => Some("vulkan-tools"),
             Capability::WineBase => Some("wine64"),
             Capability::CabExtract => Some("cabextract"),
+            Capability::GpuDriverNvidia => Some("nvidia-driver"),
+            Capability::GpuDriverMesa => Some("mesa-vulkan-drivers"),
+            Capability::VulkanLoader => Some("libvulkan1"),
+            Capability::VulkanIcdMesa => Some("mesa-vulkan-drivers"),
+            Capability::VulkanIcdNvidia => Some("nvidia-vulkan-icd"),
+            Capability::LinuxFirmware => Some("linux-firmware"),
+            Capability::Wine32 => Some("wine32"),
+            Capability::VulkanLoader32 => Some("libvulkan1:i386"),
         }
     }
 }
@@ -137,6 +188,11 @@ impl PackageManager for DnfPm {
         match package {
             "wine" => Command::new("wine")
                 .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "vulkan-loader.i686" => Command::new("vulkaninfo")
+                .arg("--summary")
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false),
@@ -182,6 +238,14 @@ impl PackageManager for DnfPm {
             Capability::VulkanTools => Some("vulkan-tools"),
             Capability::WineBase => Some("wine"),
             Capability::CabExtract => Some("cabextract"),
+            Capability::GpuDriverNvidia => Some("akmod-nvidia"),
+            Capability::GpuDriverMesa => Some("mesa-vulkan-drivers"),
+            Capability::VulkanLoader => Some("vulkan-loader"),
+            Capability::VulkanIcdMesa => Some("mesa-vulkan-drivers"),
+            Capability::VulkanIcdNvidia => Some("nvidia-vulkan"),
+            Capability::LinuxFirmware => Some("linux-firmware"),
+            Capability::Wine32 => Some("wine"),
+            Capability::VulkanLoader32 => Some("vulkan-loader.i686"),
         }
     }
 }
@@ -207,6 +271,16 @@ impl PackageManager for PacmanPm {
         // Also check for common binary if package check fails
         match package {
             "wine" => Command::new("wine")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "lib32-vulkan-icd-loader" => Command::new("vulkaninfo")
+                .arg("--summary")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "lib32-glibc" => Command::new("wine")
                 .arg("--version")
                 .output()
                 .map(|o| o.status.success())
@@ -254,6 +328,14 @@ impl PackageManager for PacmanPm {
             Capability::VulkanTools => Some("vulkan-tools"),
             Capability::WineBase => Some("wine"),
             Capability::CabExtract => Some("cabextract"),
+            Capability::GpuDriverNvidia => Some("nvidia"),
+            Capability::GpuDriverMesa => Some("mesa"),
+            Capability::VulkanLoader => Some("vulkan-icd-loader"),
+            Capability::VulkanIcdMesa => Some("mesa"),
+            Capability::VulkanIcdNvidia => Some("nvidia-utils"),
+            Capability::LinuxFirmware => Some("linux-firmware"),
+            Capability::Wine32 => Some("lib32-glibc"),
+            Capability::VulkanLoader32 => Some("lib32-vulkan-icd-loader"),
         }
     }
 }
@@ -279,6 +361,16 @@ impl PackageManager for ZypperPm {
         // Also check for common binary if package check fails
         match package {
             "wine" => Command::new("wine")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "libvulkan1-32bit" => Command::new("vulkaninfo")
+                .arg("--summary")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false),
+            "wine-32bit" => Command::new("wine")
                 .arg("--version")
                 .output()
                 .map(|o| o.status.success())
@@ -326,6 +418,14 @@ impl PackageManager for ZypperPm {
             Capability::VulkanTools => Some("vulkan-tools"),
             Capability::WineBase => Some("wine"),
             Capability::CabExtract => Some("cabextract"),
+            Capability::GpuDriverNvidia => Some("nvidia-driver"),
+            Capability::GpuDriverMesa => Some("Mesa"),
+            Capability::VulkanLoader => Some("libvulkan1"),
+            Capability::VulkanIcdMesa => Some("Mesa"),
+            Capability::VulkanIcdNvidia => Some("nvidia-gl"),
+            Capability::LinuxFirmware => Some("kernel-firmware"),
+            Capability::Wine32 => Some("wine-32bit"),
+            Capability::VulkanLoader32 => Some("libvulkan1-32bit"),
         }
     }
 }
@@ -393,19 +493,19 @@ mod tests {
     fn package_for_all_capabilities() {
         use Capability::*;
         let apt = AptPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32] {
             assert!(apt.package_for(cap).is_some());
         }
         let dnf = DnfPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32] {
             assert!(dnf.package_for(cap).is_some());
         }
         let pacman = PacmanPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32] {
             assert!(pacman.package_for(cap).is_some());
         }
         let zypper = ZypperPm;
-        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract] {
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract, GpuDriverNvidia, GpuDriverMesa, VulkanLoader, VulkanIcdMesa, VulkanIcdNvidia, LinuxFirmware, Wine32, VulkanLoader32] {
             assert!(zypper.package_for(cap).is_some());
         }
     }
