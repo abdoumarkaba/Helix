@@ -357,3 +357,90 @@ pub fn detect_package_manager(
 
     Err(PlayError::UnsupportedDistro { distro: "unknown".into() })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modules::detection::CommandRunner;
+
+    #[derive(Clone)]
+    struct MockRunner {
+        available: &'static str,
+    }
+
+    impl CommandRunner for MockRunner {
+        fn run_command(&self, program: &str, _args: &[&str]) -> Result<String, String> {
+            if program == self.available {
+                Ok(String::new())
+            } else {
+                Err("not found".to_owned())
+            }
+        }
+        fn clone_boxed(&self) -> Box<dyn CommandRunner> {
+            Box::new(self.clone())
+        }
+    }
+
+    #[test]
+    fn pm_names() {
+        assert_eq!(AptPm.name(), "apt");
+        assert_eq!(DnfPm.name(), "dnf");
+        assert_eq!(PacmanPm.name(), "pacman");
+        assert_eq!(ZypperPm.name(), "zypper");
+    }
+
+    #[test]
+    fn package_for_all_capabilities() {
+        use Capability::*;
+        let apt = AptPm;
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract] {
+            assert!(apt.package_for(cap).is_some());
+        }
+        let dnf = DnfPm;
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract] {
+            assert!(dnf.package_for(cap).is_some());
+        }
+        let pacman = PacmanPm;
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract] {
+            assert!(pacman.package_for(cap).is_some());
+        }
+        let zypper = ZypperPm;
+        for cap in [GameMode, MangoHud, Vulkan, VulkanTools, WineBase, CabExtract] {
+            assert!(zypper.package_for(cap).is_some());
+        }
+    }
+
+    #[test]
+    fn detect_package_manager_apt() {
+        let runner = MockRunner { available: "apt" };
+        let pm = detect_package_manager(&runner).unwrap();
+        assert_eq!(pm.name(), "apt");
+    }
+
+    #[test]
+    fn detect_package_manager_dnf() {
+        let runner = MockRunner { available: "dnf" };
+        let pm = detect_package_manager(&runner).unwrap();
+        assert_eq!(pm.name(), "dnf");
+    }
+
+    #[test]
+    fn detect_package_manager_pacman() {
+        let runner = MockRunner { available: "pacman" };
+        let pm = detect_package_manager(&runner).unwrap();
+        assert_eq!(pm.name(), "pacman");
+    }
+
+    #[test]
+    fn detect_package_manager_zypper() {
+        let runner = MockRunner { available: "zypper" };
+        let pm = detect_package_manager(&runner).unwrap();
+        assert_eq!(pm.name(), "zypper");
+    }
+
+    #[test]
+    fn detect_package_manager_none() {
+        let runner = MockRunner { available: "" };
+        assert!(detect_package_manager(&runner).is_err());
+    }
+}
