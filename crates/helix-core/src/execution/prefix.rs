@@ -295,17 +295,20 @@ impl PrefixModule {
         // For GE-Proton compatibility: ensure pfx/ subdirectory exists
         // GE-Proton expects STEAM_COMPAT_DATA_PATH/pfx as the actual WINEPREFIX
         let pfx_path = path.join("pfx");
-        if !pfx_path.exists() {
-            fs::create_dir_all(&pfx_path).map_err(|e| PlayError::PrefixCreation {
-                prefix_path: path.to_owned(),
-                reason: format!("failed to create pfx/ subdirectory: {e}"),
-            })?;
-            tracing::info!(
-                event = "pfx_subdirectory_created",
-                path = %pfx_path.display(),
-                "Created pfx/ subdirectory for GE-Proton compatibility"
-            );
+        // Ensure a clean pfx directory; stale 32-bit prefixes can cause
+        // WINEARCH mismatches on re-runs.
+        if pfx_path.exists() {
+            let _ = fs::remove_dir_all(&pfx_path);
         }
+        fs::create_dir_all(&pfx_path).map_err(|e| PlayError::PrefixCreation {
+            prefix_path: path.to_owned(),
+            reason: format!("failed to create pfx/ subdirectory: {e}"),
+        })?;
+        tracing::info!(
+            event = "pfx_subdirectory_created",
+            path = %pfx_path.display(),
+            "Created pfx/ subdirectory for GE-Proton compatibility"
+        );
 
         // Run wineboot to initialize the prefix (using pfx/ as WINEPREFIX).
         // Modern (wow64-only) Wine rejects WINEARCH=win32; fall back to win64,
@@ -330,6 +333,25 @@ impl PrefixModule {
                 tracing::warn!(
                     "wineboot with WINEARCH=win32 failed on wow64-only Wine; retrying with WINEARCH=win64"
                 );
+                let output = self.run_wine_with_env(
+                    &pfx_path,
+                    &["wineboot", "--init"],
+                    &[("WINEARCH", "win64")],
+                )?;
+                tracing::debug!(
+                    event = "wineboot_completed",
+                    output = %output.trim(),
+                    "Wine prefix initialized"
+                );
+                Ok(())
+            },
+            Err(e) if e.to_string().contains("32-bit installation") => {
+                tracing::warn!("Stale 32-bit prefix detected; recreating as win64");
+                let _ = fs::remove_dir_all(&pfx_path);
+                fs::create_dir_all(&pfx_path).map_err(|e| PlayError::PrefixCreation {
+                    prefix_path: path.to_owned(),
+                    reason: format!("failed to recreate pfx/ subdirectory: {e}"),
+                })?;
                 let output = self.run_wine_with_env(
                     &pfx_path,
                     &["wineboot", "--init"],

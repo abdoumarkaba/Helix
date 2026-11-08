@@ -9,6 +9,14 @@ use std::process::Command;
 
 use crate::models::errors::PlayError;
 
+fn running_as_root() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("Uid:")).map(|l| l.to_owned()))
+        .and_then(|l| l.split_whitespace().nth(1).map(|u| u == "0"))
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Package-manager abstraction
 // ---------------------------------------------------------------------------
@@ -67,17 +75,29 @@ pub struct AptPm;
 impl PackageManager for AptPm {
     fn prepare_multiarch(&self) -> Result<(), PlayError> {
         // Enable i386 multiarch (idempotent) and refresh package lists.
-        let _ = std::process::Command::new("sudo")
-            .args(["dpkg", "--add-architecture", "i386"])
-            .output();
-        let output = std::process::Command::new("sudo")
-            .args(["apt-get", "update"])
-            .output()
-            .map_err(|e| PlayError::PackageInstall {
-                pm: "apt".into(),
-                package: "multiarch".into(),
-                stderr: e.to_string(),
-            })?;
+        let dpkg_result = if running_as_root() {
+            std::process::Command::new("dpkg")
+                .args(["--add-architecture", "i386"])
+                .output()
+        } else {
+            std::process::Command::new("sudo")
+                .args(["dpkg", "--add-architecture", "i386"])
+                .output()
+        };
+        let _ = dpkg_result;
+
+        let output = if running_as_root() {
+            std::process::Command::new("apt-get").arg("update").output()
+        } else {
+            std::process::Command::new("sudo")
+                .args(["apt-get", "update"])
+                .output()
+        }
+        .map_err(|e| PlayError::PackageInstall {
+            pm: "apt".into(),
+            package: "multiarch".into(),
+            stderr: e.to_string(),
+        })?;
         if !output.status.success() {
             return Err(PlayError::PackageInstall {
                 pm: "apt".into(),
@@ -149,8 +169,15 @@ impl PackageManager for AptPm {
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
         // Try with sudo first (for interactive terminals)
-        let output = Command::new("sudo")
-            .args(["apt-get", "install", "-y"])
+        let mut cmd = if running_as_root() {
+            Command::new("apt-get")
+        } else {
+            let mut c = Command::new("sudo");
+            c.arg("apt-get");
+            c
+        };
+        let output = cmd
+            .args(["install", "-y"])
             .args(packages)
             .output()
             .map_err(|e| PlayError::PackageInstall {
@@ -260,14 +287,20 @@ impl PackageManager for DnfPm {
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
         // Try with sudo first (for interactive terminals)
-        let output =
-            Command::new("sudo").args(["dnf", "install", "-y"]).args(packages).output().map_err(
-                |e| PlayError::PackageInstall {
-                    pm: "dnf".into(),
-                    package: packages.join(", "),
-                    stderr: e.to_string(),
-                },
-            )?;
+        let mut cmd = if running_as_root() {
+            Command::new("dnf")
+        } else {
+            let mut c = Command::new("sudo");
+            c.arg("dnf");
+            c
+        };
+        let output = cmd.args(["install", "-y"]).args(packages).output().map_err(|e| {
+            PlayError::PackageInstall {
+                pm: "dnf".into(),
+                package: packages.join(", "),
+                stderr: e.to_string(),
+            }
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -374,8 +407,15 @@ impl PackageManager for PacmanPm {
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
         // Try with sudo first (for interactive terminals)
-        let output = Command::new("sudo")
-            .args(["pacman", "-S", "--noconfirm"])
+        let mut cmd = if running_as_root() {
+            Command::new("pacman")
+        } else {
+            let mut c = Command::new("sudo");
+            c.arg("pacman");
+            c
+        };
+        let output = cmd
+            .args(["-S", "--noconfirm"])
             .args(packages)
             .output()
             .map_err(|e| PlayError::PackageInstall {
@@ -489,8 +529,15 @@ impl PackageManager for ZypperPm {
 
     fn install(&self, packages: &[&str]) -> Result<(), PlayError> {
         // Try with sudo first (for interactive terminals)
-        let output = Command::new("sudo")
-            .args(["zypper", "install", "-y"])
+        let mut cmd = if running_as_root() {
+            Command::new("zypper")
+        } else {
+            let mut c = Command::new("sudo");
+            c.arg("zypper");
+            c
+        };
+        let output = cmd
+            .args(["install", "-y"])
             .args(packages)
             .output()
             .map_err(|e| PlayError::PackageInstall {

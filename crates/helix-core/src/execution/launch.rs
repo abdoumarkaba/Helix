@@ -2,6 +2,7 @@
 //!
 //! Security: Never uses shell strings. All arguments are passed explicitly
 //! to `Command::spawn()` to prevent injection when paths contain spaces.
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -185,11 +186,21 @@ impl LaunchModule {
                             );
                             stable_count += 1;
                         } else {
+                            let stderr = child
+                                .stderr
+                                .take()
+                                .map(|mut s| {
+                                    let mut buf = String::new();
+                                    let _ = s.read_to_string(&mut buf);
+                                    buf
+                                })
+                                .unwrap_or_default();
                             return Err(PlayError::GameLaunchFailed {
                                 exe_path: exe_path.clone(),
                                 reason: format!(
-                                    "game process exited during launch (code: {:?}) with no child processes",
-                                    status.code()
+                                    "game process exited during launch (code: {:?}) with no child processes; stderr: {}",
+                                    status.code(),
+                                    stderr.trim()
                                 ),
                             });
                         }

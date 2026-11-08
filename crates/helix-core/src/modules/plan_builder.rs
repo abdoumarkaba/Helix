@@ -607,13 +607,9 @@ impl<'a> PlanBuilder<'a> {
                         already_installed: false,
                     });
                 }
-                if !self.env.hardware.gaming_tools.vulkan_available {
-                    packages.push(RequiredPackage {
-                        name: "nvidia-vulkan-icd".to_owned(),
-                        reason: "NVIDIA Vulkan ICD for D3D/Vulkan translation.".to_owned(),
-                        already_installed: false,
-                    });
-                }
+                // NVIDIA ICD is provided by the container runtime / host driver
+                // (nvidia-container-toolkit), so no distro package is requested.
+                let _ = self.env.hardware.gaming_tools.vulkan_available;
             },
             GpuVendor::AMD | GpuVendor::Intel if !self.env.hardware.gaming_tools.vulkan_available => {
                 packages.push(RequiredPackage {
